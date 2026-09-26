@@ -28,16 +28,22 @@ const SESSION_MAX_AGE = 30 * 24 * 60 * 60; // matches the backend's JWT_EXPIRE_D
 // Cloudinary upload; under Vercel's 60-second limit per request.
 const TIMEOUT_MS = 55_000;
 
-// A bad setting stops the website at start with a message saying which, instead of every call failing.
-if (!INTERNAL_API_KEY && PRODUCTION) {
-  throw new Error("INTERNAL_API_KEY must be set for the website server in production.");
+/** What's wrong with the settings, or null. */
+function settingsProblem(): string | null {
+  if (!INTERNAL_API_KEY && PRODUCTION) return "INTERNAL_API_KEY must be set for the website server in production.";
+  if (!/^[\x21-\x7e]*$/.test(INTERNAL_API_KEY)) {
+    return "INTERNAL_API_KEY has a space, line break or other character that can't be sent. Paste only the key itself.";
+  }
+  if (!/^https?:\/\/[^/\s]+/.test(BACKEND_URL) || !URL.canParse(BACKEND_URL)) {
+    return `BACKEND_URL must be the API's full address, like ${LIVE_API} (or leave it unset to use that one).`;
+  }
+  return null;
 }
-if (!/^[\x21-\x7e]*$/.test(INTERNAL_API_KEY)) {
-  throw new Error("INTERNAL_API_KEY has a space, line break or other character that can't be sent. Paste only the key itself.");
-}
-if (!/^https?:\/\/[^/\s]+/.test(BACKEND_URL) || !URL.canParse(BACKEND_URL)) {
-  throw new Error(`BACKEND_URL must be the API's full address, like ${LIVE_API} (or leave it unset to use that one).`);
-}
+
+// A bad setting is written to the logs, saying which, on every call. Visitors are told the shop isn't set up
+// right (not that they typed something wrong), and the setting itself never reaches the browser.
+const SETTINGS_PROBLEM = settingsProblem();
+if (SETTINGS_PROBLEM) console.error(`Website setting problem: ${SETTINGS_PROBLEM}`);
 
 function isHttps(): boolean {
   const request = getRequest();
@@ -97,6 +103,10 @@ function failureReason(error: unknown, token: string | undefined): string {
 }
 
 export async function callBackend<T>(path: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" = "GET", body?: unknown): Promise<Result<T>> {
+  if (SETTINGS_PROBLEM) {
+    console.error(`Website setting problem: ${SETTINGS_PROBLEM}`);
+    return { ok: false, status: 503, message: "The Night Mart isn't set up correctly right now. Please let the shop know." };
+  }
   const headers: Record<string, string> = { "X-Internal-Key": INTERNAL_API_KEY, Accept: "application/json" };
   const ip = clientIP();
   if (ip) headers["X-Client-IP"] = ip;

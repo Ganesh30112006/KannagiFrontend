@@ -31,7 +31,7 @@ Phone / browser ──(same-site calls, HttpOnly cookie)──▶ this website's
    | --- | --- |
    | `INTERNAL_API_KEY` | exactly the same value as `INTERNAL_API_KEY` on the Render API |
 
-   Nothing else is needed: leave `BACKEND_URL` unset, and don't import other `.env` files here. Quotes or spaces pasted around the value are ignored; a missing or broken key stops the website with a message in Vercel's logs saying so.
+   Nothing else is needed: leave `BACKEND_URL` unset, and don't import other `.env` files here. Quotes or spaces pasted around the value are ignored. With a missing or broken key, visitors see "The Night Mart isn't set up correctly right now" and Vercel's logs say `Website setting problem: ...` with what to fix.
 4. **Deploy.** The site opens at `https://<project>.vercel.app`: the sign-in page for customers and shopkeepers, and `/admin` for admins.
 5. **Domain:** the shop's domain is `kannagimart.tech` (Vercel → the project → **Settings → Domains**). Add `www.kannagimart.tech` there too, choosing to redirect it to `kannagimart.tech`, and create the DNS record Vercel shows for it.
 

@@ -23,9 +23,12 @@ export async function unwrap<T>(call: Promise<Result<T>>): Promise<T> {
     result = await call;
   } catch (error) {
     // fetch() itself failing (offline, server down) is a TypeError. Anything else came back from the
-    // website server: usually input its checks refused, which is not a connection problem.
+    // website server: input its checks (zod) refused, whose message is the list of problems ("[{...}]"),
+    // or a fault on the server, which is not the visitor's doing.
     if (error instanceof TypeError) throw new ApiError("Couldn't reach the Night Mart. Check your connection and try again.", 0);
-    throw new ApiError("That didn't go through. Please check what you entered and try again.", 400);
+    const refused = error instanceof Error && (error.name === "ZodError" || /^\s*\[\s*\{/.test(error.message));
+    if (refused) throw new ApiError("That didn't go through. Please check what you entered and try again.", 400);
+    throw new ApiError("Something went wrong on our side. Please try again in a moment.", 500);
   }
   if (!result.ok) {
     if (result.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SIGNED_OUT));
