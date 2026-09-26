@@ -1,6 +1,6 @@
 # Kannagi Night Mart website
 
-The Kannagi Night Mart website: the customer storefront, the shopkeeper dashboard (`/dashboard`) and the admin console (`/admin`). React 19 + TanStack Start, deployed on Vercel.
+The Kannagi Night Mart website, live at **https://kannagimart.tech**: the customer storefront, the shopkeeper dashboard (`/dashboard`) and the admin console (`/admin`). React 19 + TanStack Start, deployed on Vercel.
 
 ## How it talks to the API
 
@@ -31,8 +31,9 @@ Phone / browser ──(same-site calls, HttpOnly cookie)──▶ this website's
    | --- | --- |
    | `INTERNAL_API_KEY` | exactly the same value as `INTERNAL_API_KEY` on the Render API |
 
-   Nothing else is needed. The website refuses to start without the key, and Vercel's logs then say so.
+   Nothing else is needed: leave `BACKEND_URL` unset, and don't import other `.env` files here. Quotes or spaces pasted around the value are ignored; a missing or broken key stops the website with a message in Vercel's logs saying so.
 4. **Deploy.** The site opens at `https://<project>.vercel.app`: the sign-in page for customers and shopkeepers, and `/admin` for admins.
+5. **Domain:** the shop's domain is `kannagimart.tech` (Vercel → the project → **Settings → Domains**). Add `www.kannagimart.tech` there too, choosing to redirect it to `kannagimart.tech`, and create the DNS record Vercel shows for it.
 
 What the build sets up by itself (`vite.config.ts`, when Vercel builds it):
 
@@ -42,6 +43,16 @@ What the build sets up by itself (`vite.config.ts`, when Vercel builds it):
 - **Visitors' addresses:** taken from Vercel's `X-Forwarded-For`, which Vercel sets itself, for the API's per-network limits.
 
 Every push to `main` deploys to production; other branches get preview deployments (they use the same live API).
+
+### "The Night Mart server isn't responding"
+
+The website couldn't reach the API. Vercel → the project → **Logs** has a line saying why: `The API at <address> could not be reached: <reason>`.
+
+- **The address isn't `https://kannagibackend.onrender.com`:** a `BACKEND_URL` is set in Vercel's Environment Variables. Delete it and redeploy.
+- **A timeout:** the API on Render is down or still waking; check it at `https://kannagibackend.onrender.com/api/health` and in the Render dashboard.
+- **"Request failed" instead (the API answered 404):** `INTERNAL_API_KEY` differs between Vercel and Render. Copy Render's value into Vercel and redeploy.
+
+Changed Environment Variables apply only to new deployments: Vercel → **Deployments** → the latest → **Redeploy**.
 
 ## CI
 

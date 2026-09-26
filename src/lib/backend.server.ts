@@ -9,9 +9,16 @@ import type { Result } from "./mart-types";
 // development points it at a local API, and start-production at the one it starts.
 const LIVE_API = "https://kannagibackend.onrender.com";
 const PRODUCTION = process.env["NODE_ENV"] === "production" || Boolean(process.env["VERCEL"]);
-// Trimmed like the API trims its own copy, so a stray space pasted into a setting can't break every call.
-const BACKEND_URL = (process.env["BACKEND_URL"] || (PRODUCTION ? LIVE_API : "http://127.0.0.1:8000")).trim().replace(/\/+$/, "");
-const INTERNAL_API_KEY = (process.env["INTERNAL_API_KEY"] ?? "").trim();
+
+/** A setting as typed into a hosting dashboard: spaces, a line break or the quotes of a .env line around it are dropped. */
+function setting(name: string): string {
+  const value = (process.env[name] ?? "").trim();
+  const quoted = value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0];
+  return quoted ? value.slice(1, -1).trim() : value;
+}
+
+const BACKEND_URL = (setting("BACKEND_URL") || (PRODUCTION ? LIVE_API : "http://127.0.0.1:8000")).replace(/\/+$/, "");
+const INTERNAL_API_KEY = setting("INTERNAL_API_KEY");
 // Vercel (VERCEL=1) sets X-Forwarded-For to the visitor's address itself, replacing whatever the visitor sent.
 const TRUST_PROXY = process.env["TRUST_PROXY"] === "true" || Boolean(process.env["VERCEL"]);
 const COOKIE_SECURE = process.env["COOKIE_SECURE"] ?? "auto";
@@ -21,8 +28,15 @@ const SESSION_MAX_AGE = 30 * 24 * 60 * 60; // matches the backend's JWT_EXPIRE_D
 // Cloudinary upload; under Vercel's 60-second limit per request.
 const TIMEOUT_MS = 55_000;
 
+// A bad setting stops the website at start with a message saying which, instead of every call failing.
 if (!INTERNAL_API_KEY && PRODUCTION) {
   throw new Error("INTERNAL_API_KEY must be set for the website server in production.");
+}
+if (!/^[\x21-\x7e]*$/.test(INTERNAL_API_KEY)) {
+  throw new Error("INTERNAL_API_KEY has a space, line break or other character that can't be sent. Paste only the key itself.");
+}
+if (!/^https?:\/\/[^/\s]+/.test(BACKEND_URL) || !URL.canParse(BACKEND_URL)) {
+  throw new Error(`BACKEND_URL must be the API's full address, like ${LIVE_API} (or leave it unset to use that one).`);
 }
 
 function isHttps(): boolean {
@@ -70,6 +84,18 @@ function clientIP(): string | undefined {
   return getRequestIP();
 }
 
+/** Why a call failed (timeout, address not found, connection refused, ...), with the key and login token blanked out. */
+function failureReason(error: unknown, token: string | undefined): string {
+  const parts: string[] = [];
+  for (let e: unknown = error; e instanceof Error && parts.length < 3; e = e.cause) {
+    const code = (e as Error & { code?: unknown }).code;
+    parts.push(`${e.name}${typeof code === "string" ? ` ${code}` : ""}: ${e.message}`);
+  }
+  let reason = parts.join(" <- ") || String(error);
+  for (const secret of [INTERNAL_API_KEY, token]) if (secret) reason = reason.split(secret).join("<hidden>");
+  return reason.slice(0, 500);
+}
+
 export async function callBackend<T>(path: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" = "GET", body?: unknown): Promise<Result<T>> {
   const headers: Record<string, string> = { "X-Internal-Key": INTERNAL_API_KEY, Accept: "application/json" };
   const ip = clientIP();
@@ -86,7 +112,9 @@ export async function callBackend<T>(path: string, method: "GET" | "POST" | "PUT
       signal: AbortSignal.timeout(TIMEOUT_MS),
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-  } catch {
+  } catch (error) {
+    // For the host's logs (Vercel: the project → Logs): why the API couldn't be reached.
+    console.error(`The API at ${BACKEND_URL} could not be reached: ${failureReason(error, token)}`);
     return { ok: false, status: 503, message: "The Night Mart server isn't responding. Please try again in a moment." };
   }
 
