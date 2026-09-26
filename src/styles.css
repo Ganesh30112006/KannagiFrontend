@@ -1,0 +1,91 @@
+@import "tailwindcss" source(none);
+@source "../src";
+
+/* Fonts are served by this site (no Google Fonts requests), trimmed to Latin + ₹ and the symbols
+   the site uses; see assets/fonts/LICENSE-OFL.txt. swap: text shows at once in a fallback font. */
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 400 800; font-display: swap; src: url("./assets/fonts/nunito.woff2") format("woff2"); }
+@font-face { font-family: "Baloo 2"; font-style: normal; font-weight: 600 800; font-display: swap; src: url("./assets/fonts/baloo2.woff2") format("woff2"); }
+@font-face { font-family: "Kalam"; font-style: normal; font-weight: 400; font-display: swap; src: url("./assets/fonts/kalam-400.woff2") format("woff2"); }
+@font-face { font-family: "Kalam"; font-style: normal; font-weight: 700; font-display: swap; src: url("./assets/fonts/kalam-700.woff2") format("woff2"); }
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-hero: var(--hero);
+  --color-banner: var(--banner);
+  --color-product: var(--product);
+  --color-stock: var(--stock);
+  --color-stock-foreground: var(--stock-foreground);
+  --color-alert: var(--alert);
+  --color-alert-foreground: var(--alert-foreground);
+  --font-hand: "Kalam", cursive;
+  --font-display: "Baloo 2", sans-serif;
+  --font-body: "Nunito", sans-serif;
+}
+
+:root {
+  --radius: 0.45rem;
+  --background: oklch(0.972 0.018 12);
+  --foreground: oklch(0.205 0.063 271);
+  --card: oklch(0.992 0.012 22);
+  --card-foreground: oklch(0.22 0.055 277);
+  --popover: oklch(0.995 0.008 20);
+  --popover-foreground: oklch(0.22 0.055 277);
+  --primary: oklch(0.56 0.205 2);
+  --primary-foreground: oklch(0.99 0.01 20);
+  --secondary: oklch(0.86 0.085 8);
+  --secondary-foreground: oklch(0.26 0.06 277);
+  --muted: oklch(0.93 0.025 15);
+  --muted-foreground: oklch(0.48 0.045 278);
+  --accent: oklch(0.91 0.12 90);
+  --accent-foreground: oklch(0.27 0.055 277);
+  --destructive: oklch(0.56 0.22 27);
+  --destructive-foreground: oklch(0.99 0.01 20);
+  --border: oklch(0.76 0.055 8);
+  --input: oklch(0.78 0.048 8);
+  --ring: oklch(0.57 0.19 2);
+  --hero: oklch(0.205 0.063 271);
+  --banner: oklch(0.88 0.075 9);
+  --product: oklch(0.94 0.045 88);
+  --stock: oklch(0.78 0.105 150);
+  --stock-foreground: oklch(0.25 0.06 150);
+  --alert: oklch(0.7 0.2 28);
+  --alert-foreground: oklch(0.99 0.01 20);
+  --shadow-color: color-mix(in oklab, var(--foreground) 24%, transparent);
+}
+
+* { border-color: var(--border); letter-spacing: 0; }
+html { font-family: var(--font-body); scroll-behavior: smooth; }
+body { margin: 0; background: var(--background); color: var(--foreground); }
+button, input, select { font: inherit; }
+.bg-hero-wash { background: linear-gradient(90deg, color-mix(in oklab, var(--hero) 92%, transparent) 0%, color-mix(in oklab, var(--hero) 70%, transparent) 48%, color-mix(in oklab, var(--hero) 25%, transparent) 100%); }
+.product-card { border-radius: var(--radius); }
+.night-sky { background-color: var(--hero); background-image: radial-gradient(circle at 18% 30%, color-mix(in oklab, var(--secondary) 12%, transparent) 0 1px, transparent 2px), radial-gradient(circle at 76% 18%, color-mix(in oklab, var(--accent) 18%, transparent) 0 1px, transparent 2px); background-size: 44px 44px, 57px 57px; }
+.paint-card { clip-path: polygon(1% 5%, 8% 2%, 17% 4%, 28% 1%, 41% 4%, 53% 1%, 67% 3%, 81% 1%, 98% 4%, 97% 24%, 100% 39%, 97% 57%, 99% 75%, 96% 98%, 82% 96%, 69% 99%, 51% 96%, 34% 99%, 18% 96%, 2% 98%, 4% 78%, 1% 61%, 4% 43%); }
+.mood-card { border-radius: var(--radius); }
+@keyframes twinkle { 0%,100% { opacity:.25; transform:scale(.75) rotate(0deg); } 50% { opacity:1; transform:scale(1.15) rotate(12deg); } }
+.twinkle { animation: twinkle 3.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .twinkle { animation: none; } }

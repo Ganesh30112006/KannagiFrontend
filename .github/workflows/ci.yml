@@ -1,0 +1,48 @@
+# Checks the website on every push to main and every pull request.
+# Vercel builds and deploys it by itself; this catches type, lint and build errors, and anything
+# server-only (the API's key or address) ending up in files sent to browsers.
+name: Website
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Types, lint and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22 # the build needs 22.12 or newer
+          cache: npm
+      - run: npm ci
+      - name: Types
+        run: npx tsc --noEmit
+      - name: Lint
+        # Formatting is left out: Lovable's edits use their own style.
+        run: |
+          npx eslint . --rule "prettier/prettier: off"
+      - name: Build (Node server, as start-production runs it)
+        run: npm run build
+      - name: Build (as Vercel builds it)
+        run: npm run build
+        env:
+          VERCEL: "1"
+      - name: Nothing server-only reaches the browser
+        run: |
+          if grep -rlE "X-Internal-Key|INTERNAL_API_KEY|BACKEND_URL|onrender\.com" .output/public .vercel/output/static; then
+            echo "::error::The files above are sent to the browser but mention the API's internal key or address."
+            exit 1
+          fi
