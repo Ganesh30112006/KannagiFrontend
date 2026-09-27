@@ -21,6 +21,7 @@ import {
   LogOut,
   Phone,
   Plus,
+  Receipt,
   Search,
   ShoppingBag,
   Sparkles,
@@ -36,6 +37,7 @@ import periodComfortGirl from "@/assets/period-comfort-girl.webp";
 import weekendMovieGirls from "@/assets/weekend-movie-girls.webp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ManualSalePanel, SalesSummaryPanel } from "@/components/sales-panels";
 import { api, ApiError } from "@/lib/api";
 import { staleSince, useLiveSync, writeMark } from "@/lib/live-sync";
 import { ROLE_KEY } from "@/lib/login-role";
@@ -53,6 +55,7 @@ import type {
   DailyOffer,
   Delivery,
   KnownRevs,
+  ManualSale,
   Order,
   Payment,
   PlaceOrderInput,
@@ -133,6 +136,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/" }: 
   const [wheelRewards, setWheelRewards] = useState<WheelPrize[]>([]);
   const [couponRule, setCouponRule] = useState<CouponRule>("best");
   const [salesSummary, setSalesSummary] = useState<SalesSummary | null>(null);
+  const [manualSales, setManualSales] = useState<ManualSale[]>([]);
   // Shop details the site admin sets (UPI, contacts, hours, options, prices).
   const [site, setSite] = useState<SiteDetails>(DEFAULT_SITE);
   const newestOrderId = useRef<number | null>(null);
@@ -230,6 +234,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/" }: 
       newestOrderId.current = newest;
       setAdminOrders(rows);
       setSalesSummary(data.admin.summary);
+      if (data.admin.manualSales) setManualSales(data.admin.manualSales);
     }
     revs.current = { ...data.revs, adminOrders: data.admin ? data.revs.orders : revs.current.adminOrders };
   }
@@ -385,7 +390,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/" }: 
       {mode === "customer" ? (
         <CustomerView loaded={loaded} products={products} cart={cart} updateCart={updateCart} wishes={wishes} wishInput={wishInput} setWishInput={setWishInput} submitWish={submitWish} wishMessage={wishMessage} coupon={coupon} firstOrder={loaded && firstOrder} launchMessage={launchMessage} dailyOffers={dailyOffers} />
       ) : mode === "history" ? <OrderHistory orders={orders} onOpen={setReceipt} onPay={setPaying} onEditProfile={() => setProfileOpen(true)} /> : adminUnlocked ? (
-        <AdminView products={products} setProducts={setProducts} wishes={wishes} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} summary={salesSummary} promotionsSaved={() => { promotionsDirty.current = false; }} />
+        <AdminView products={products} setProducts={setProducts} wishes={wishes} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={() => { promotionsDirty.current = false; }} />
       ) : (
         <section className="mx-auto grid max-w-md gap-3 px-4 py-16 text-center">
           <h2 className="font-hand text-3xl font-bold">Shopkeeper dashboard</h2>
@@ -486,7 +491,7 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
           const soldOut = product.stock === 0;
           const low = product.stock > 0 && product.stock <= product.threshold;
           return (
-            <article key={product.id} className={`product-card relative border-2 border-foreground/10 bg-card p-3 shadow-[3px_4px_0_var(--shadow-color)] ${index % 3 === 1 ? "rotate-[.6deg]" : index % 3 === 2 ? "-rotate-[.5deg]" : ""}`}>
+            <article key={product.id} className={`product-card relative min-w-0 border-2 border-foreground/10 bg-card p-3 shadow-[3px_4px_0_var(--shadow-color)] ${index % 3 === 1 ? "rotate-[.6deg]" : index % 3 === 2 ? "-rotate-[.5deg]" : ""}`}>
               <div className="grid aspect-square place-items-center overflow-hidden rounded-sm bg-product text-6xl sm:text-7xl">
                 {product.image ? <img src={product.image} alt={product.name} className="h-full w-full object-cover" loading="lazy" decoding="async" /> : <span aria-hidden="true">{product.emoji}</span>}
               </div>
@@ -494,7 +499,7 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
                 {soldOut ? "Out of Stock" : low ? `Only ${product.stock} left!` : "In Stock"}
               </span>
               <h3 className="mt-3 min-h-12 font-hand text-xl font-bold leading-tight">{product.name}</h3>
-              <div className="flex items-end justify-between gap-2"><div>{isEggProduct(product) ? <><p className="text-lg font-bold text-primary">{money(product.mrp)} / egg</p><p className="text-[11px] text-muted-foreground">Quantity total + ₹{site.markup} once</p></> : <><p className="text-lg font-bold text-primary">{money(product.mrp + site.markup)}</p><p className="text-[11px] text-muted-foreground">MRP {money(product.mrp)} + ₹{site.markup}</p></>}</div></div>
+              <div className="flex items-end justify-between gap-2"><div className="min-w-0 [overflow-wrap:anywhere]">{isEggProduct(product) ? <><p className="text-lg font-bold text-primary">{money(product.mrp)} / egg</p><p className="text-[11px] text-muted-foreground">Quantity total + ₹{site.markup} once</p></> : <><p className="text-lg font-bold text-primary">{money(product.mrp + site.markup)}</p><p className="text-[11px] text-muted-foreground">MRP {money(product.mrp)} + ₹{site.markup}</p></>}</div></div>
               <div className="mt-3 grid grid-cols-[2rem_1fr_2rem] items-center rounded-md border border-border bg-background p-1">
                 <Button size="icon" variant="ghost" aria-label={`Remove ${product.name}`} onClick={() => updateCart(product.id, -1)} disabled={!qty}><Minus /></Button>
                 <span className="text-center font-bold">{qty}</span>
@@ -611,7 +616,7 @@ function SpinWheel({ prizes, spun, coupon, onResult, onClose }: { prizes: WheelP
   );
 }
 
-function AdminView({ products, setProducts, wishes, orders, setOrders, override, setOverride, storeOnline, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, summary, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; summary: SalesSummary | null; promotionsSaved: () => void }) {
+function AdminView({ products, setProducts, wishes, orders, setOrders, override, setOverride, storeOnline, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, summary, manualSales, setManualSales, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; summary: SalesSummary | null; manualSales: ManualSale[]; setManualSales: React.Dispatch<React.SetStateAction<ManualSale[]>>; promotionsSaved: () => void }) {
   const site = useSite();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -620,6 +625,8 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
   const [newImage, setNewImage] = useState<string | undefined>();
   const addFormRef = useRef<HTMLFormElement>(null);
   const [savingPromotions, setSavingPromotions] = useState(false);
+  // The dashboard's pages: shop management, entering an in-person sale, and the sales figures.
+  const [page, setPage] = useState<DashboardPage>("dashboard");
   const lowStock = products.filter((item) => item.stock <= item.threshold);
   const analytics = useMemo(() => {
     const sold = new Map((summary?.sold ?? []).map((item) => [item.name, item.qty] as const));
@@ -682,6 +689,7 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
   }
 
   function openAddForm() {
+    setPage("dashboard");
     setAdding(true);
     // The form sits at the top of the dashboard; bring it into view from the inventory button too.
     window.setTimeout(() => addFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
@@ -713,6 +721,11 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
     } catch (error) {
       toast.error(errorText(error, "Could not delete the product."));
     }
+  }
+
+  function manualSaleRecorded(sale: ManualSale, taken: Record<number, number>) {
+    setProducts((current) => current.map((product) => (taken[product.id] ? { ...product, stock: Math.max(0, product.stock - (taken[product.id] ?? 0)) } : product)));
+    setManualSales((current) => [sale, ...current.filter((item) => item.id !== sale.id)]);
   }
 
   const [orderFilter, setOrderFilter] = useState<"pending" | "done" | "all">("pending");
@@ -775,11 +788,22 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
-        <div className="min-w-0"><p className="font-hand text-lg font-bold text-primary">{site.pickupPoint} · <a className="underline" href={`tel:+91${site.shopPhone}`}>{spacedPhone(site.shopPhone)}</a></p><h2 className="font-hand text-3xl font-bold leading-tight sm:text-4xl">Shopkeeper Dashboard</h2><p className="text-xs text-muted-foreground">WhatsApp: <a className="underline" href={shopWhatsApp(site, "Hi! This is Kannagi Night Mart.")}>+91 {spacedPhone(site.shopPhone)}</a> · UPI {site.upiId}</p></div>
-        <Button onClick={() => (adding ? setAdding(false) : openAddForm())}><PackagePlus /> {adding ? "Close" : "Add item"}</Button>
+      <div className="grid grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4">
+        <div className="min-w-0"><p className="font-hand text-lg font-bold text-primary [overflow-wrap:anywhere]">{site.pickupPoint} · <a className="underline" href={`tel:+91${site.shopPhone}`}>{spacedPhone(site.shopPhone)}</a></p><h2 className="font-hand text-3xl font-bold leading-tight sm:text-4xl">Shopkeeper Dashboard</h2><p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">WhatsApp: <a className="underline" href={shopWhatsApp(site, "Hi! This is Kannagi Night Mart.")}>+91 {spacedPhone(site.shopPhone)}</a> · UPI {site.upiId}</p></div>
+        <Button className="justify-self-start sm:justify-self-auto" onClick={() => (adding && page === "dashboard" ? setAdding(false) : openAddForm())}><PackagePlus /> {adding && page === "dashboard" ? "Close" : "Add item"}</Button>
       </div>
 
+      <div role="tablist" aria-label="Dashboard pages" className="mt-4 grid grid-cols-3 gap-1 rounded-md border border-border bg-card p-1">
+        {DASHBOARD_PAGES.map(({ id, label, icon: Icon }) => (
+          <Button key={id} role="tab" aria-selected={page === id} variant={page === id ? "default" : "ghost"} className="h-auto min-h-10 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => setPage(id)}>
+            <Icon /> {label}
+          </Button>
+        ))}
+      </div>
+
+      {page === "manual" && <ManualSalePanel products={products} sales={manualSales} onRecorded={manualSaleRecorded} onUndone={(sale) => setManualSales((current) => current.map((item) => (item.id === sale.id ? sale : item)))} />}
+
+      {page === "dashboard" && (<>
       {adding && (
         <form ref={addFormRef} onSubmit={addProduct} aria-label="Add item" className="mt-5 grid scroll-mt-36 gap-4 border-2 border-dashed border-primary/35 bg-card p-4 sm:grid-cols-[14rem_1fr]">
           <PhotoPicker label="New item" emoji="🛍️" image={newImage} onPick={setNewImage} onRemove={() => setNewImage(undefined)} />
@@ -819,32 +843,16 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
           <span className="text-xs font-normal text-muted-foreground">{couponRule === "best" ? "If the offer saves more, the customer keeps her coupon for a later order." : "An eligible spin coupon is used even when an offer would save more."}</span>
         </label>
         <h4 className="mt-5 font-hand text-xl font-bold">Daily offer cards</h4>
-        <div className="mt-2 grid gap-3 md:grid-cols-2">
-          {dailyOffers.map((offer, index) => <article key={offer.id} className="grid gap-2 rounded-md border border-border bg-background p-3"><div className="grid grid-cols-[4rem_1fr] gap-2"><Input aria-label={`${offer.id} icon`} maxLength={16} value={offer.icon} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, icon: event.target.value } : item))} /><Input aria-label={`${offer.id} title`} maxLength={80} value={offer.title} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} /></div><Input aria-label={`${offer.id} description`} maxLength={200} value={offer.note} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, note: event.target.value } : item))} /><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={offer.active} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))} /> Show this offer</label></article>)}
+        <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+          {dailyOffers.map((offer, index) => <article key={offer.id} className="grid min-w-0 gap-2 rounded-md border border-border bg-background p-3"><div className="grid grid-cols-[4rem_1fr] gap-2"><Input aria-label={`${offer.id} icon`} maxLength={16} value={offer.icon} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, icon: event.target.value } : item))} /><Input aria-label={`${offer.id} title`} maxLength={80} value={offer.title} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} /></div><Input aria-label={`${offer.id} description`} maxLength={200} value={offer.note} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, note: event.target.value } : item))} /><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={offer.active} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))} /> Show this offer</label></article>)}
         </div>
         <h4 className="mt-5 font-hand text-xl font-bold">Spin wheel slices</h4>
-        <div className="mt-2 grid gap-3 md:grid-cols-2">
-           {wheelRewards.map((reward, index) => <article key={`${reward.code}-${index}`} className="grid gap-2 rounded-md border border-border bg-background p-3"><div className="grid grid-cols-[4rem_1fr] gap-2"><Input aria-label={`${reward.code} icon`} maxLength={16} value={reward.icon} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, icon: event.target.value } : item))} /><Input aria-label={`${reward.code} offer text`} maxLength={80} value={reward.label} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value, shortLabel: event.target.value } : item))} /></div><select aria-label={`${reward.code} reward rule`} value={reward.kind ?? "luck"} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, kind: event.target.value === "luck" ? null : event.target.value as CouponKind } : item))} className="h-10 rounded-md border border-input bg-background px-3 text-sm"><option value="free60">Free delivery on ₹60+</option><option value="three5">₹5 off any 3 items</option><option value="freeSnack100">Free ₹10 snack on ₹100+</option><option value="halfDelivery">50% off room delivery</option><option value="four10">₹10 off any 4 items</option><option value="premium5">₹5 off 2 premium items</option><option value="luck">Better Luck Next Time</option></select><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={reward.active} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))} /> Active slice</label></article>)}
+        <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+           {wheelRewards.map((reward, index) => <article key={`${reward.code}-${index}`} className="grid min-w-0 gap-2 rounded-md border border-border bg-background p-3"><div className="grid grid-cols-[4rem_1fr] gap-2"><Input aria-label={`${reward.code} icon`} maxLength={16} value={reward.icon} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, icon: event.target.value } : item))} /><Input aria-label={`${reward.code} offer text`} maxLength={80} value={reward.label} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value, shortLabel: event.target.value } : item))} /></div><select aria-label={`${reward.code} reward rule`} value={reward.kind ?? "luck"} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, kind: event.target.value === "luck" ? null : event.target.value as CouponKind } : item))} className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm"><option value="free60">Free delivery on ₹60+</option><option value="three5">₹5 off any 3 items</option><option value="freeSnack100">Free ₹10 snack on ₹100+</option><option value="halfDelivery">50% off room delivery</option><option value="four10">₹10 off any 4 items</option><option value="premium5">₹5 off 2 premium items</option><option value="luck">Better Luck Next Time</option></select><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={reward.active} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))} /> Active slice</label></article>)}
         </div>
         <Button className="mt-4 w-full" onClick={savePromotions} disabled={savingPromotions}><Check /> {savingPromotions ? "Saving…" : "Save offers & wheel"}</Button>
       </section>
 
-      <section className="mt-6" aria-labelledby="analytics-title">
-        <div className="flex items-center gap-2"><TrendingUp className="size-7 text-primary" /><h3 id="analytics-title" className="font-hand text-3xl font-bold">Sales &amp; Analytics</h3></div>
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          {[{ label: "Revenue", value: analytics.totalRevenue }, { label: "Investment", value: analytics.investment }, { label: "Net Profit", value: analytics.totalRevenue - analytics.investment }].map((metric) => <article key={metric.label} className="rounded-md border-2 border-dashed border-primary/30 bg-card p-3 text-center"><p className="text-xs font-bold text-muted-foreground">{metric.label}</p><p className="font-display text-xl font-extrabold text-primary sm:text-3xl">{money(metric.value)}</p></article>)}
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">UPI orders count once you confirm their payment.</p>
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <article className="rounded-md border border-border bg-card p-4"><h4 className="font-hand text-xl font-bold">Items sold</h4><BarList label="Items sold" color="var(--primary)" rows={analytics.performance.map((item) => ({ name: item.name, value: item.sold }))} /></article>
-          <article className="rounded-md border border-border bg-card p-4"><h4 className="font-hand text-xl font-bold">Wishlist requests</h4><BarList label="Wishlist requests" color="var(--secondary)" rows={analytics.wishlist.map((item) => ({ name: item.name, value: item.requests }))} /></article>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <AnalyticsList title="🏆 Best Sellers" items={analytics.best.map((item) => `${item.name} · ${item.sold} sold`)} />
-          <AnalyticsList title="🐢 Slow Movers" items={analytics.slow.map((item) => `${item.name} · ${item.sold} sold`)} />
-          <AnalyticsList title="📦 Restock Advice" items={analytics.performance.filter((item) => item.sold > 0 || item.stock <= 3).sort((a,b) => b.sold-a.sold).slice(0,3).map((item) => `Buy +${Math.max(5, Math.ceil(Math.max(item.sold * 2, 10) / 5) * 5)} units of ${item.name} for next week`)} />
-        </div>
-      </section>
 
 
       <section className="mt-6 bg-alert p-5 text-alert-foreground shadow-[5px_6px_0_var(--shadow-color)]">
@@ -852,26 +860,26 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
         <div className="mt-3 flex flex-wrap gap-2">{lowStock.length === 0 && <span className="text-sm font-bold">Everything is stocked up ✨</span>}{lowStock.map((item) => <span key={item.id} className="rounded-full bg-card px-3 py-1 text-sm font-bold text-foreground">Restock Alert: {item.name} ({item.stock} remaining)</span>)}</div>
       </section>
 
-      <div className="mt-8 grid gap-8 lg:grid-cols-[1.35fr_.65fr]">
+      <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,.65fr)]">
         <section>
           <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-hand text-3xl font-bold">Inventory Management</h3><Button variant="secondary" onClick={openAddForm}><PackagePlus /> Add item</Button></div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {products.map((item) => (
-              <article key={item.id} className="border-2 border-foreground/10 bg-card p-4 shadow-[3px_4px_0_var(--shadow-color)]">
+              <article key={item.id} className="min-w-0 border-2 border-foreground/10 bg-card p-4 shadow-[3px_4px_0_var(--shadow-color)]">
                 <PhotoPicker label={item.name} emoji={item.emoji} image={item.image} onPick={(image) => updateProduct(item.id, { image })} onRemove={() => updateProduct(item.id, { image: null })} compact />
                 <div className="mt-3 min-w-0">
                   <div className="min-w-0"><h4 className="truncate font-hand text-xl font-bold">{item.name}</h4><p className="text-xs text-muted-foreground">{isEggProduct(item) ? `${money(item.mrp)} per egg + ₹${site.markup} per bundle` : `MRP ${money(item.mrp)} + ₹${site.markup}`}</p></div>
                 </div>
                 <label className="mt-3 grid gap-1 text-xs font-bold">Purchase / MRP price<Input key={item.mrp} type="number" min="0" step="0.01" defaultValue={item.mrp} onBlur={(event) => changePrice(item, event.target)} /></label>
-                <Counter label="Current stock" value={item.stock} minus={() => changeProduct(item.id,"stock",-1)} plus={() => changeProduct(item.id,"stock",1)} />
-                <Counter label="Restock threshold" value={item.threshold} minus={() => changeProduct(item.id,"threshold",-1)} plus={() => changeProduct(item.id,"threshold",1)} />
+                <Counter label="Current stock" value={item.stock} minus={() => changeProduct(item.id,"stock",-1)} plus={() => changeProduct(item.id,"stock",1)} set={(value) => changeProduct(item.id, "stock", value - item.stock)} />
+                <Counter label="Restock threshold" value={item.threshold} minus={() => changeProduct(item.id,"threshold",-1)} plus={() => changeProduct(item.id,"threshold",1)} set={(value) => changeProduct(item.id, "threshold", value - item.threshold)} />
                  <Button variant="destructive" className="mt-3 w-full" onClick={() => void deleteProduct(item)}><Trash2 /> Delete item</Button>
               </article>
             ))}
           </div>
         </section>
         <aside className="space-y-7">
-          <section className="border-2 border-dashed border-primary/35 bg-accent p-5"><h3 className="font-hand text-2xl font-bold">Customer Wishlist Requests</h3><div className="mt-4 space-y-3">{wishes.length === 0 && <p className="text-sm">No requests yet.</p>}{wishes.map(({ name, count }, index) => <div key={name} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-foreground/10 pb-2"><span className="grid size-7 place-items-center rounded-full bg-primary font-bold text-primary-foreground">{index+1}</span><span className="font-bold">{name}</span><span className="text-sm">{plural(count, "Request")}</span></div>)}</div></section>
+          <section className="border-2 border-dashed border-primary/35 bg-accent p-5"><h3 className="font-hand text-2xl font-bold">Customer Wishlist Requests</h3><div className="mt-4 space-y-3">{wishes.length === 0 && <p className="text-sm">No requests yet.</p>}{wishes.map(({ name, count }, index) => <div key={name} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-foreground/10 pb-2"><span className="grid size-7 place-items-center rounded-full bg-primary font-bold text-primary-foreground">{index+1}</span><span className="font-bold [overflow-wrap:anywhere]">{name}</span><span className="text-sm">{plural(count, "Request")}</span></div>)}</div></section>
           <section>
             <h3 className="font-hand text-3xl font-bold">Incoming Orders</h3>{summary && summary.orderCount > orders.length && <p className="text-xs text-muted-foreground">Showing the latest {orders.length} of {summary.orderCount} orders.</p>}
             <div role="group" aria-label="Show orders" className="mt-3 grid grid-cols-3 gap-1 rounded-md border border-border bg-card p-1">
@@ -887,9 +895,33 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
           </section>
         </aside>
       </div>
+      </>)}
+
+      {page === "summary" && (<>
+      <SalesSummaryPanel summary={summary} />
+      <section className="mt-6" aria-labelledby="analytics-title">
+        <div className="flex items-center gap-2"><TrendingUp className="size-7 text-primary" /><h3 id="analytics-title" className="font-hand text-3xl font-bold">Analytics</h3></div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <article className="rounded-md border border-border bg-card p-4"><h4 className="font-hand text-xl font-bold">Items sold</h4><BarList label="Items sold" color="var(--primary)" rows={analytics.performance.map((item) => ({ name: item.name, value: item.sold }))} /></article>
+          <article className="rounded-md border border-border bg-card p-4"><h4 className="font-hand text-xl font-bold">Wishlist requests</h4><BarList label="Wishlist requests" color="var(--secondary)" rows={analytics.wishlist.map((item) => ({ name: item.name, value: item.requests }))} /></article>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <AnalyticsList title="🏆 Best Sellers" items={analytics.best.map((item) => `${item.name} · ${item.sold} sold`)} />
+          <AnalyticsList title="🐢 Slow Movers" items={analytics.slow.map((item) => `${item.name} · ${item.sold} sold`)} />
+          <AnalyticsList title="📦 Restock Advice" items={analytics.performance.filter((item) => item.sold > 0 || item.stock <= 3).sort((a,b) => b.sold-a.sold).slice(0,3).map((item) => `Buy +${Math.max(5, Math.ceil(Math.max(item.sold * 2, 10) / 5) * 5)} units of ${item.name} for next week`)} />
+        </div>
+      </section>
+      </>)}
     </div>
   );
 }
+
+type DashboardPage = "dashboard" | "manual" | "summary";
+const DASHBOARD_PAGES: { id: DashboardPage; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "manual", label: "Manual sale", icon: Receipt },
+  { id: "summary", label: "Summary", icon: TrendingUp },
+];
 
 const orderTime = (ms: number) => new Date(ms).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 
@@ -901,7 +933,7 @@ export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cance
   const call = phone ? callLink(phone) : undefined;
   const chat = phone ? whatsappChat(phone, `Hi${name ? ` ${name}` : ""}! About your Kannagi Night Mart order ${orderLabel(order)}: `) : undefined;
   return (
-    <article aria-label={`Order ${orderLabel(order)}`} className={`border-2 border-foreground/10 p-4 shadow-[3px_4px_0_var(--shadow-color)] ${order.fulfilled || order.cancelled ? "bg-muted" : "bg-card"}`}>
+    <article aria-label={`Order ${orderLabel(order)}`} className={`min-w-0 border-2 border-foreground/10 p-4 [overflow-wrap:anywhere] shadow-[3px_4px_0_var(--shadow-color)] ${order.fulfilled || order.cancelled ? "bg-muted" : "bg-card"}`}>
       <div className="flex items-baseline justify-between gap-2"><p className="font-hand text-xl font-bold">Order {orderLabel(order)}</p><b>{money(order.total)}</b></div>
       <p className="text-xs text-muted-foreground">{orderTime(order.createdAt)}</p>
       {order.cancelled && <p className="mt-1 inline-block rounded-full bg-destructive px-2 py-0.5 text-[11px] font-bold text-destructive-foreground">✕ Cancelled by the admin: stock returned</p>}
@@ -946,7 +978,7 @@ function AnalyticsList({ title, items }: { title: string; items: string[] }) {
 }
 
 function OrderHistory({ orders, onOpen, onPay, onEditProfile }: { orders: Order[]; onOpen: (order: Order) => void; onPay: (order: Order) => void; onEditProfile: () => void }) {
-  return <section className="mx-auto max-w-4xl px-4 py-10 sm:px-6"><p className="font-hand text-lg font-bold text-primary">Saved to your account</p><div className="flex flex-wrap items-end justify-between gap-3"><h2 className="font-display text-4xl font-extrabold">My Orders</h2><Button variant="outline" size="sm" onClick={onEditProfile}>Edit my hostel details</Button></div>{orders.length === 0 ? <p className="mt-6 border-2 border-dashed border-border bg-card p-8 text-center text-muted-foreground">Your first order will appear here.</p> : <div className="mt-6 grid gap-4 sm:grid-cols-2">{orders.map((order) => <article key={order.id} className="rounded-md border-2 border-dashed border-primary/30 bg-card p-5 shadow-[4px_5px_0_var(--shadow-color)]"><div className="flex items-start justify-between gap-3"><div><h3 className="font-hand text-2xl font-bold">Order {orderLabel(order)}</h3><p className="text-xs text-muted-foreground">{order.createdAt ? new Date(order.createdAt).toLocaleString() : ""}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-xs font-bold ${orderState(order).waiting ? "bg-accent text-accent-foreground" : "bg-stock text-stock-foreground"}`}>{orderState(order).badge}</span></div><p className="mt-3 text-sm">{order.items.map((item) => `${item.name} ×${item.qty}`).join(", ")}</p><p className="mt-2 text-sm text-muted-foreground">{order.delivery} · {order.payment}</p><p className="text-sm font-semibold">{orderState(order).detail}</p>{needsPayment(order) && <Button size="sm" className="mt-2 w-full" onClick={() => onPay(order)}>Pay {money(order.total)} now</Button>}<div className="mt-3 flex items-center justify-between"><b className="text-xl text-primary">{money(order.total)}</b><Button size="sm" variant="outline" onClick={() => onOpen(order)}>View receipt</Button></div></article>)}</div>}</section>;
+  return <section className="mx-auto max-w-4xl px-4 py-10 sm:px-6 [overflow-wrap:anywhere]"><p className="font-hand text-lg font-bold text-primary">Saved to your account</p><div className="flex flex-wrap items-end justify-between gap-3"><h2 className="font-display text-4xl font-extrabold">My Orders</h2><Button variant="outline" size="sm" onClick={onEditProfile}>Edit my hostel details</Button></div>{orders.length === 0 ? <p className="mt-6 border-2 border-dashed border-border bg-card p-8 text-center text-muted-foreground">Your first order will appear here.</p> : <div className="mt-6 grid gap-4 sm:grid-cols-2">{orders.map((order) => <article key={order.id} className="rounded-md border-2 border-dashed border-primary/30 bg-card p-5 shadow-[4px_5px_0_var(--shadow-color)]"><div className="flex items-start justify-between gap-3"><div><h3 className="font-hand text-2xl font-bold">Order {orderLabel(order)}</h3><p className="text-xs text-muted-foreground">{order.createdAt ? new Date(order.createdAt).toLocaleString() : ""}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-xs font-bold ${orderState(order).waiting ? "bg-accent text-accent-foreground" : "bg-stock text-stock-foreground"}`}>{orderState(order).badge}</span></div><p className="mt-3 text-sm">{order.items.map((item) => `${item.name} ×${item.qty}`).join(", ")}</p><p className="mt-2 text-sm text-muted-foreground">{order.delivery} · {order.payment}</p><p className="text-sm font-semibold">{orderState(order).detail}</p>{needsPayment(order) && <Button size="sm" className="mt-2 w-full" onClick={() => onPay(order)}>Pay {money(order.total)} now</Button>}<div className="mt-3 flex items-center justify-between"><b className="text-xl text-primary">{money(order.total)}</b><Button size="sm" variant="outline" onClick={() => onOpen(order)}>View receipt</Button></div></article>)}</div>}</section>;
 }
 
 function ProfileForm({ profile, setProfile, submit, close }: { profile: CustomerProfile; setProfile: React.Dispatch<React.SetStateAction<CustomerProfile>>; submit: (event: FormEvent<HTMLFormElement>) => void; close?: () => void }) {
@@ -1048,8 +1080,40 @@ function BarList({ label, color, rows }: { label: string; color: string; rows: {
   );
 }
 
-function Counter({ label, value, minus, plus }: { label: string; value: number; minus: () => void; plus: () => void }) {
-  return <div className="mt-3 grid grid-cols-[minmax(0,1fr)_2rem_2rem_2rem] items-center gap-1"><span className="min-w-0 text-xs font-bold">{label}</span><Button size="icon" variant="outline" onClick={minus}><Minus /></Button><span className="text-center font-bold">{value}</span><Button size="icon" variant="outline" onClick={plus}><Plus /></Button></div>;
+/** A number with − and + buttons that can also be typed: Enter or leaving the box saves it, Esc puts it back. */
+function Counter({ label, value, minus, plus, set }: { label: string; value: number; minus: () => void; plus: () => void; set: (value: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const keep = useRef(false); // Esc: leave the box without saving
+  function commit(typed: string) {
+    setDraft(null);
+    if (keep.current) { keep.current = false; return; }
+    if (!typed.trim()) return;
+    const next = Number(typed);
+    if (!Number.isInteger(next) || next < 0 || next > 100_000) { toast.error(`${label}: enter a whole number from 0 to 100000.`); return; }
+    if (next !== value) set(next);
+  }
+  return (
+    <div className="mt-3 grid grid-cols-[minmax(0,1fr)_2.25rem_4rem_2.25rem] items-center gap-1">
+      <span className="min-w-0 text-xs font-bold">{label}</span>
+      <Button size="icon" variant="outline" aria-label={`${label}: one less`} onClick={minus}><Minus /></Button>
+      <Input
+        type="text"
+        inputMode="numeric"
+        aria-label={label}
+        maxLength={6}
+        value={draft ?? String(value)}
+        onFocus={(event) => { setDraft(String(value)); event.currentTarget.select(); }}
+        onChange={(event) => setDraft(event.target.value.replace(/\D/g, ""))}
+        onBlur={(event) => commit(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          else if (event.key === "Escape") { keep.current = true; event.currentTarget.blur(); }
+        }}
+        className="h-9 px-1 text-center font-bold"
+      />
+      <Button size="icon" variant="outline" aria-label={`${label}: one more`} onClick={plus}><Plus /></Button>
+    </div>
+  );
 }
 
 /** A UPI order she hasn't paid (or hasn't told us about) yet. */

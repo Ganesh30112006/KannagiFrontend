@@ -9,6 +9,7 @@ import type {
   CustomerProfile,
   KnownRevs,
   Live,
+  ManualSale,
   Order,
   Product,
   Promotions,
@@ -207,6 +208,25 @@ export const deleteProduct = createServerFn({ method: "POST" })
 export const savePromotions = createServerFn({ method: "POST" })
   .validator((data: unknown) => promotions.parse(data))
   .handler(async ({ data }) => (await server()).callBackend<Promotions>("/admin/promotions", "PUT", data));
+
+/** A sale made in person: its items come off the stock and it counts in sales and profit. */
+export const recordManualSale = createServerFn({ method: "POST" })
+  .validator((data: unknown) =>
+    z
+      .object({
+        items: z.array(z.object({ productId: z.number().int().positive(), quantity: z.number().int().min(1).max(1000) })).min(1).max(50),
+        payment: z.enum(["Cash", "UPI"]),
+        amount: z.number().min(0).max(100_000).optional(),
+        note: z.string().trim().max(100).optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }) => (await server()).callBackend<ManualSale>("/admin/manual-sales", "POST", data));
+
+/** A manual sale entered by mistake: its items go back on the shelf and it stops counting. */
+export const undoManualSale = createServerFn({ method: "POST" })
+  .validator((data: unknown) => id.parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<ManualSale>(`/admin/manual-sales/${data.id}/undo`, "POST"));
 
 export const setStore = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ override: z.enum(["auto", "online", "offline"]) }).parse(data))

@@ -281,7 +281,8 @@ function OverviewTab({ open }: { open: (tab: Tab, role?: AdminUserRole) => void 
   const tiles: [string, string | number, Tab, AdminUserRole?][] = overview
     ? [
         ["Orders today", overview.ordersToday, "orders"],
-        ["Money in today", money(overview.revenueToday), "orders"],
+        ["Manual sales today", overview.manualSalesToday ?? 0, "shop"],
+        ["Money in today (online + manual)", money(overview.revenueToday), "orders"],
         ["Open orders", overview.openOrders, "orders"],
         ["UPI payments to confirm", overview.awaitingPayment, "orders"],
         ["Password requests", overview.resetRequests, "people", "resets"],
@@ -316,7 +317,8 @@ function OverviewTab({ open }: { open: (tab: Tab, role?: AdminUserRole) => void 
         <ul className="grid gap-2 text-sm sm:grid-cols-2">
           <li>
             <b>Shop &amp; dashboard:</b> products, photos, stock, prices, offers, spin wheel, store
-            open/closed, orders and sales. Also shows the shop as customers see it.
+            open/closed and orders; Manual sale (sales made in person) and Summary (online, manual
+            and total sales and profit). Also shows the shop as customers see it.
           </li>
           <li>
             <b>Shop details:</b> UPI ID and QR, payee name, phone numbers, pickup point, hours,
@@ -711,14 +713,14 @@ function DetailsTab() {
         </p>
       )}
       <div className="sticky bottom-0 mt-4 flex gap-2 border-t border-border bg-background/95 py-3">
-        <Button disabled={saving} className="h-11 flex-1">
+        <Button disabled={saving} className="h-auto min-h-11 min-w-0 flex-1 whitespace-normal">
           <Save />
           {saving ? "Saving…" : "Save shop details"}
         </Button>
         <Button
           type="button"
           variant="outline"
-          className="h-11"
+          className="h-auto min-h-11 whitespace-normal"
           disabled={saving}
           onClick={() => {
             dirty.current = false;
@@ -907,7 +909,7 @@ function PeopleTab({
           {role === "resets" ? "Nobody is waiting for a new password." : "Nobody matches."}
         </p>
       )}
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
         {people?.map((person) => {
           const self = person.id === me.id;
           // The main admin (from the server settings) and your own account can't be blocked,
@@ -917,7 +919,7 @@ function PeopleTab({
             <article
               key={person.id}
               aria-label={person.email ?? person.phone ?? "Account"}
-              className={`rounded-lg border-2 border-foreground/10 p-4 shadow-[3px_4px_0_var(--shadow-color)] ${person.blocked ? "bg-muted" : "bg-card"}`}
+              className={`min-w-0 rounded-lg border-2 border-foreground/10 p-4 shadow-[3px_4px_0_var(--shadow-color)] [overflow-wrap:anywhere] ${person.blocked ? "bg-muted" : "bg-card"}`}
             >
               <div className="flex flex-wrap items-center gap-2">
                 <p className="min-w-0 break-all font-bold">{nameOf(person)}</p>
@@ -1472,7 +1474,7 @@ function OrdersTab({
       )}
       {!shown && <p className="mt-6 text-muted-foreground">Loading…</p>}
       {shown?.length === 0 && <p className="mt-6 text-muted-foreground">No orders here.</p>}
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {shown?.map((order) => (
           <OrderCard
             key={order.id}

@@ -161,15 +161,47 @@ export type SyncResult = {
   wishes?: Wish[];
   orders?: Order[];
   firstOrderAvailable?: boolean;
-  admin?: { orders: AdminOrder[]; summary: SalesSummary };
+  admin?: { orders: AdminOrder[]; summary: SalesSummary; manualSales?: ManualSale[] };
 };
 
-/** All-time sales totals for the dashboard (computed by the database). */
+/** Sales of one kind: how many (orders or manual sales), units sold, money in, and what the items cost
+ * (their MRP). Profit is revenue - investment. */
+export type SalesFigures = { count: number; items: number; revenue: number; investment: number };
+
+/** All-time sales totals for the dashboard (computed by the database). revenue, investment and sold
+ * cover online orders and manual sales together; online and manual split them. */
 export type SalesSummary = {
   orderCount: number;
   revenue: number;
   investment: number;
   sold: { name: string; qty: number }[];
+  online?: SalesFigures;
+  manual?: SalesFigures;
+};
+
+export type ManualPayment = "Cash" | "UPI";
+
+/** A sale made in person (at the shop's room), entered on the dashboard. */
+export type ManualSale = {
+  id: number;
+  createdAt: number;
+  items: { name: string; qty: number; price: number }[];
+  total: number;
+  investment: number;
+  payment: ManualPayment;
+  note?: string;
+  /** The sign-in number of whoever entered it. */
+  recordedBy?: string;
+  /** Undone: entered by mistake, its items went back on the shelf and it no longer counts. */
+  cancelled: boolean;
+};
+
+export type ManualSaleInput = {
+  items: { productId: number; quantity: number }[];
+  payment: ManualPayment;
+  /** What was received; left out, the shop's prices. */
+  amount?: number;
+  note?: string;
 };
 
 /** What server functions return: errors come back as values so no stack traces reach the browser. */
@@ -223,6 +255,8 @@ export type AdminOverview = {
   admins: number;
   blocked: number;
   ordersToday: number;
+  manualSalesToday?: number;
+  /** Paid online orders and manual sales. */
   revenueToday: number;
   openOrders: number;
   awaitingPayment: number;

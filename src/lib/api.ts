@@ -2,7 +2,7 @@
 // the browser never learns the backend's address and never holds the login token.
 import { write } from "./live-sync";
 import * as fn from "./mart.functions";
-import type { CustomerProfile, KnownRevs, PlaceOrderInput, Product, Promotions, Result, StoreOverride } from "./mart-types";
+import type { CustomerProfile, KnownRevs, ManualSaleInput, PlaceOrderInput, Product, Promotions, Result, StoreOverride } from "./mart-types";
 
 export class ApiError extends Error {
   constructor(
@@ -81,5 +81,7 @@ export const api = {
     deleteProduct: (id: number) => change(() => fn.deleteProduct({ data: { id } })),
     savePromotions: (promotions: Promotions) => change(() => fn.savePromotions({ data: promotions })),
     setStore: (override: StoreOverride) => change(() => fn.setStore({ data: { override } })),
+    recordManualSale: (sale: ManualSaleInput) => change(() => fn.recordManualSale({ data: sale })),
+    undoManualSale: (id: number) => change(() => fn.undoManualSale({ data: { id } })),
   },
 };
