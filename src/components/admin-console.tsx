@@ -50,7 +50,7 @@ import type {
 import { callLink, formatMobile, isMobile, whatsappChat } from "@/lib/phone";
 import { money } from "@/lib/pricing";
 import { hourLabel } from "@/lib/site";
-import { upiProfileLink } from "@/lib/upi";
+import { readQrImage, upiProfileLink, upiQrName, upiQrPayee } from "@/lib/upi";
 
 const errorText = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
@@ -343,7 +343,7 @@ function OverviewTab({ open }: { open: (tab: Tab, role?: AdminUserRole) => void 
 // --- shop details ---
 
 type Toggle = {
-  [K in keyof SiteSettings]: SiteSettings[K] extends boolean ? K : never;
+  [K in keyof SiteSettings]-?: SiteSettings[K] extends boolean ? K : never;
 }[keyof SiteSettings];
 
 const editable = (settings: SiteAdminSettings): SiteSettings => {
@@ -395,17 +395,54 @@ function DetailsTab() {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
   };
 
+  // With the shop's own QR uploaded, customers scan a QR with exactly its text; otherwise one made from the UPI ID.
   const qr = useQr(
     draft
-      ? upiProfileLink({ upiId: draft.upiId.trim(), upiName: draft.upiName.trim() })
+      ? draft.upiQr || upiProfileLink({ upiId: draft.upiId.trim(), upiName: draft.upiName.trim() })
       : "upi://pay",
   );
+  const qrPayee = draft?.upiQr ? upiQrPayee(draft.upiQr) : null;
+  const qrMismatch = Boolean(
+    draft && qrPayee && qrPayee.toLowerCase() !== draft.upiId.trim().toLowerCase(),
+  );
+  const qrFile = useRef<HTMLInputElement>(null);
+  const [readingQr, setReadingQr] = useState(false);
+
+  async function uploadQr(file: File | undefined) {
+    if (!file) return;
+    setReadingQr(true);
+    try {
+      const text = await readQrImage(file);
+      const payee = text ? upiQrPayee(text) : null;
+      if (!text || !payee) {
+        toast.error(
+          text
+            ? "That QR isn't a UPI payment QR. Upload the QR from your PhonePe, Google Pay or Paytm app."
+            : "Couldn't find a QR code in that picture. Try a clear screenshot of the whole QR.",
+        );
+        return;
+      }
+      const name = upiQrName(text);
+      dirty.current = true;
+      setDraft((current) =>
+        current
+          ? { ...current, upiQr: text, upiId: payee, upiName: name ? name.slice(0, 60) : current.upiName }
+          : current,
+      );
+      toast.success(`QR read: it pays ${payee}. Press Save to use it.`);
+    } catch {
+      toast.error("Couldn't open that picture. Try a PNG or JPEG screenshot of the QR.");
+    } finally {
+      setReadingQr(false);
+    }
+  }
 
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!draft) return;
     const problems = [
       !UPI_ID.test(draft.upiId.trim()) && "Enter a UPI ID like 7032767115@ibl.",
+      qrMismatch && `The QR pays ${qrPayee}, not ${draft.upiId.trim()}. Upload the QR for this UPI ID, or remove the QR.`,
       !isMobile(draft.shopPhone) && "Enter a 10-digit shop phone number.",
       !isMobile(draft.helpPhone) && "Enter a 10-digit help phone number.",
       draft.openHour === draft.closeHour && "Opening and closing hours must be different.",
@@ -458,10 +495,39 @@ function DetailsTab() {
     <form onSubmit={save}>
       <Section
         title="UPI payments (QR code)"
-        note="Every UPI payment link and QR code customers get uses these, with the exact amount and order number filled in."
+        note="Customers pay by scanning the QR on the right. Upload your own QR from PhonePe, Google Pay or Paytm and they scan exactly that; without one, they get a QR made from the UPI ID with the amount filled in."
       >
         <div className="grid gap-4 md:grid-cols-[1fr_auto]">
           <div className="grid gap-3">
+            <div className="grid gap-1 text-sm font-bold">
+              Shop&apos;s UPI QR
+              <div className="flex flex-wrap gap-2">
+                <input
+                  ref={qrFile}
+                  type="file"
+                  accept="image/*"
+                  aria-label="Upload the shop's UPI QR"
+                  className="sr-only"
+                  onChange={(event) => {
+                    void uploadQr(event.target.files?.[0]);
+                    event.target.value = ""; // the same picture again still counts as a new upload
+                  }}
+                />
+                <Button type="button" variant="outline" disabled={readingQr} onClick={() => qrFile.current?.click()}>
+                  <QrCode /> {readingQr ? "Reading QR…" : draft.upiQr ? "Upload a new QR" : "Upload QR"}
+                </Button>
+                {draft.upiQr && (
+                  <Button type="button" variant="ghost" onClick={() => set("upiQr", null)}>
+                    Remove QR
+                  </Button>
+                )}
+              </div>
+              <span className="text-xs font-normal text-muted-foreground">
+                {draft.upiQr
+                  ? `Uploaded: customers scan your QR (it pays ${qrPayee ?? "?"}) and type in the amount.`
+                  : "A screenshot of your QR (PhonePe: profile → QR code). The UPI ID and name below are filled in from it."}
+              </span>
+            </div>
             {field(
               "UPI ID",
               <Input
@@ -471,7 +537,9 @@ function DetailsTab() {
                 onChange={(event) => set("upiId", event.target.value)}
                 placeholder="7032767115@ibl"
               />,
-              "The UPI ID from your PhonePe / GPay QR (the part after pa=).",
+              qrMismatch
+                ? `This isn't the UPI ID your QR pays (${qrPayee}). Upload the QR for this UPI ID, or remove the QR.`
+                : "The UPI ID from your PhonePe / GPay QR (the part after pa=). Business UPI IDs (PhonePe Business, Paytm for Business, Google Pay for Business) also let customers pay with one tap; UPI apps often block that for personal ones.",
             )}
             {field(
               "Payee name",
@@ -501,7 +569,8 @@ function DetailsTab() {
               </div>
             )}
             <figcaption className="mt-1 max-w-44 break-words text-xs text-muted-foreground">
-              Scan with your UPI app to check it shows <b>{draft.upiName}</b>.
+              {draft.upiQr ? "Your QR, as customers scan it. " : ""}Scan with your UPI app to check it shows{" "}
+              <b>{draft.upiName}</b>.
             </figcaption>
           </figure>
         </div>

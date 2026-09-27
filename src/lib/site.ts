@@ -9,6 +9,7 @@ import type { PriceRules } from "./pricing";
 export const DEFAULT_SITE: SiteDetails = {
   upiId: "7032767115@ibl",
   upiName: "Mavidi Rajendra Prasad",
+  upiQr: null,
   shopPhone: "7032767115",
   helpPhone: "9704535908",
   pickupPoint: "Block B, Room 618",

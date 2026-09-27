@@ -180,6 +180,8 @@ export type Result<T> = { ok: true; data: T } | { ok: false; status: number; mes
 export type SiteDetails = {
   upiId: string;
   upiName: string;
+  /** The shop's own UPI QR image that customers scan; null: a QR made from upiId. */
+  upiQr?: string | null;
   shopPhone: string;
   helpPhone: string;
   pickupPoint: string;

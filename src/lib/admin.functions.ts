@@ -54,6 +54,14 @@ export const adminLogin = createServerFn({ method: "POST" })
 const siteSettings = z.object({
   upiId: z.string().trim().min(3).max(130),
   upiName: text(60),
+  // What the shop's uploaded UPI QR says (upi://pay?pa=...); null removes it. The API checks the rest.
+  upiQr: z
+    .string()
+    .trim()
+    .max(1000)
+    .regex(/^upi:\/\/pay\?\S+$/i)
+    .nullable()
+    .optional(),
   shopPhone: mobile,
   helpPhone: mobile,
   pickupPoint: text(80),
