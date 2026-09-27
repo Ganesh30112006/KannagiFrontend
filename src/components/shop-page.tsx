@@ -8,7 +8,6 @@ import {
   Camera,
   Check,
   ChevronDown,
-  Copy,
   Gift,
   Heart,
   Hourglass,
@@ -42,7 +41,7 @@ import { staleSince, useLiveSync, writeMark } from "@/lib/live-sync";
 import { ROLE_KEY } from "@/lib/login-role";
 import { callLink, formatMobile, isMobile, whatsappChat } from "@/lib/phone";
 import { DEFAULT_SITE, hoursLabel, priceRules, shopWhatsApp, SiteContext, spacedPhone, useSite } from "@/lib/site";
-import { upiAppLinks, upiPayLink } from "@/lib/upi";
+import { upiPayLink } from "@/lib/upi";
 import { cartSummary, couponStatus, FREE_PICK_MAX_PRICE, isEggProduct, lineTotal, money, quote, toRupees } from "@/lib/pricing";
 import type {
   AdminOrder,
@@ -1076,9 +1075,8 @@ function orderState(order: Order): { badge: string; waiting: boolean; detail: st
 
 /** Pay for an order that is already placed: a QR to scan, then her UPI reference. The QR is the shop's own
  * (uploaded at /admin; she types the amount) or, without one, a QR with the amount and order filled in.
- * UPI apps (PhonePe, Paytm, ...) often refuse payments a website opens in them when the shop's UPI ID is a
- * personal one ("declined for security reasons"), so scanning comes first; the app buttons and the UPI ID to
- * copy are for paying on the same phone. */
+ * Scanning only: UPI apps (PhonePe, Paytm, ...) often refuse payments a website opens in them when the shop's
+ * UPI ID is a personal one ("declined for security reasons"). */
 function UpiPayment({ order, fresh, onDone, onLater }: { order: Order; fresh: boolean; onDone: (order: Order) => void; onLater: () => void }) {
   const site = useSite();
   const link = upiPayLink(site, order.total, `Kannagi Night Mart order ${orderLabel(order)}`);
@@ -1094,15 +1092,6 @@ function UpiPayment({ order, fresh, onDone, onLater }: { order: Order; fresh: bo
       .catch(() => { if (active) setQr(""); });
     return () => { active = false; };
   }, [link, shopQr]);
-
-  async function copyUpiId() {
-    try {
-      await navigator.clipboard.writeText(site.upiId);
-      toast.success(`UPI ID copied: ${site.upiId}`);
-    } catch {
-      toast.error(`Couldn't copy it. The UPI ID is ${site.upiId}`);
-    }
-  }
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1137,13 +1126,6 @@ function UpiPayment({ order, fresh, onDone, onLater }: { order: Order; fresh: bo
             <p className="text-xs text-muted-foreground">Your UPI app will show <b>{site.upiName}</b> (Kannagi Night Mart). The amount and order number are filled in.</p>
           </>
         )}
-        <div aria-label="Paying on this phone" className="mt-4 rounded-md bg-product p-3 text-left text-sm">
-          <p className="font-bold">Paying on this phone?</p>
-          <div className="mt-2 grid grid-cols-2 gap-2">{upiAppLinks(link).map((app) => <Button key={app.label} asChild variant="outline" className="h-10 bg-card"><a href={app.href}>{app.label}</a></Button>)}</div>
-          <Button asChild className="mt-2 h-10 w-full"><a href={link}>Open any UPI app</a></Button>
-          <p className="mt-3 text-xs text-muted-foreground">If your app says &ldquo;declined for security reasons&rdquo; or &ldquo;may fail&rdquo;: copy the UPI ID, choose <b>Pay to UPI ID</b> in your UPI app, paste it and pay <b>{money(order.total)}</b> with <b>{orderLabel(order)}</b> in the note.</p>
-          <Button type="button" variant="outline" className="mt-2 h-10 w-full bg-card" onClick={() => void copyUpiId()}><Copy /> <span className="truncate">Copy {site.upiId}</span></Button>
-        </div>
         <form onSubmit={send} className="mt-4 border-t border-border pt-4 text-left">
           <label className="grid gap-1 text-sm font-bold">After paying, enter the UPI reference (UTR)
             <Input value={utr} onChange={(e) => setUtr(e.target.value)} inputMode="text" autoComplete="off" maxLength={40} placeholder="e.g. 412345678901" aria-label="UPI transaction reference" className="h-11 font-normal" />

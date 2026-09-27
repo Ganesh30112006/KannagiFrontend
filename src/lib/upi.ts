@@ -49,11 +49,3 @@ export async function readQrImage(file: Blob): Promise<string | null> {
     bitmap.close();
   }
 }
-
-/** The same payment opened straight in a particular app (the plain upi:// link lets the phone choose). */
-export const upiAppLinks = (link: string) => [
-  { label: "Google Pay", href: link.replace("upi://", "tez://upi/") },
-  { label: "PhonePe", href: link.replace("upi://", "phonepe://") },
-  { label: "Paytm", href: link.replace("upi://", "paytmmp://") },
-  { label: "BHIM", href: link.replace("upi://", "bhim://") },
-];

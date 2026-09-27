@@ -539,7 +539,7 @@ function DetailsTab() {
               />,
               qrMismatch
                 ? `This isn't the UPI ID your QR pays (${qrPayee}). Upload the QR for this UPI ID, or remove the QR.`
-                : "The UPI ID from your PhonePe / GPay QR (the part after pa=). Business UPI IDs (PhonePe Business, Paytm for Business, Google Pay for Business) also let customers pay with one tap; UPI apps often block that for personal ones.",
+                : "The UPI ID from your PhonePe / GPay QR (the part after pa=).",
             )}
             {field(
               "Payee name",
