@@ -7,6 +7,8 @@ import type {
   AdminOrder,
   AdminOverview,
   AdminUser,
+  Investment,
+  Profit,
   Result,
   SiteAdminSettings,
   User,
@@ -83,6 +85,26 @@ const userPath = (id: string, action: string) =>
 export const adminOverview = createServerFn({ method: "POST" }).handler(async () =>
   (await server()).callBackend<AdminOverview>("/site-admin/overview"),
 );
+/** New stock bought and taken off in a period, and the stock left now. */
+export const adminInvestment = createServerFn({ method: "POST" })
+  .validator((data: unknown) =>
+    z.object({ period: z.enum(["today", "week", "month", "last_month", "all"]) }).parse(data),
+  )
+  .handler(async ({ data }) =>
+    (await server()).callBackend<Investment>(
+      `/site-admin/investment?${new URLSearchParams({ period: data.period })}`,
+    ),
+  );
+/** Profit in a period, day by day and item by item, and the profit in the stock left. */
+export const adminProfit = createServerFn({ method: "POST" })
+  .validator((data: unknown) =>
+    z.object({ period: z.enum(["today", "week", "month", "last_month", "all"]) }).parse(data),
+  )
+  .handler(async ({ data }) =>
+    (await server()).callBackend<Profit>(
+      `/site-admin/profit?${new URLSearchParams({ period: data.period })}`,
+    ),
+  );
 export const adminSettings = createServerFn({ method: "POST" }).handler(async () =>
   (await server()).callBackend<SiteAdminSettings>("/site-admin/settings"),
 );

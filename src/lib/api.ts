@@ -41,13 +41,13 @@ export async function unwrap<T>(call: Promise<Result<T>>): Promise<T> {
 export const change = <T>(call: () => Promise<Result<T>>) => write(() => unwrap(call()));
 
 export const api = {
-  signup: (email: string, password: string, mobile: string) => unwrap(fn.signup({ data: { email, password, mobile } })),
-  login: (email: string, password: string) => unwrap(fn.login({ data: { email, password } })),
+  signup: (mobile: string, password: string) => unwrap(fn.signup({ data: { mobile, password } })),
+  login: (mobile: string, password: string) => unwrap(fn.login({ data: { mobile, password } })),
   logout: () => unwrap(fn.logout()),
   /** The signed-in user, or null. */
   me: () => unwrap(fn.me()),
   shopkeeperLogin: (phone: string, password: string) => unwrap(fn.shopkeeperLogin({ data: { phone, password } })),
-  forgotPassword: (email: string) => unwrap(fn.forgotPassword({ data: { email } })),
+  forgotPassword: (mobile: string) => unwrap(fn.forgotPassword({ data: { mobile } })),
 
   profile: () => unwrap(fn.getProfile()),
   saveProfile: (profile: CustomerProfile) => unwrap(fn.saveProfile({ data: profile })),

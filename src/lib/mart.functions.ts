@@ -28,9 +28,6 @@ const server = () => import("./backend.server");
 
 // Mirrors the backend limits so bad input is rejected before it leaves the website server.
 const text = (max: number) => z.string().trim().min(1).max(max);
-const email = z.string().trim().email().max(320);
-const password = z.string().min(8).max(128);
-const credentials = z.object({ email, password });
 // A 10-digit Indian mobile number, written any common way; the backend checks it properly.
 const mobile = z.string().trim().min(10).max(20);
 const block = z.enum(["A", "B", "C"]);
@@ -52,9 +49,9 @@ const id = z.object({ id: z.number().int().positive() });
 
 // --- session ---
 
-/** Email is only her username (the shop never sends email); the mobile number lets the shop reach her. */
+/** Her mobile number is her username, and how the shop reaches her (it never sends messages or codes). */
 export const signup = createServerFn({ method: "POST" })
-  .validator((data: unknown) => credentials.extend({ mobile }).parse(data))
+  .validator((data: unknown) => z.object({ mobile, password: z.string().min(8).max(128) }).parse(data))
   .handler(async ({ data }): Promise<Result<User>> => {
     const { callBackend, startSession } = await server();
     const result = await callBackend<{ token: string; user: User }>("/auth/signup", "POST", data);
@@ -63,8 +60,9 @@ export const signup = createServerFn({ method: "POST" })
     return { ok: true, data: result.data.user };
   });
 
+/** A customer: her mobile number and password. */
 export const login = createServerFn({ method: "POST" })
-  .validator((data: unknown) => credentials.parse(data))
+  .validator((data: unknown) => z.object({ mobile, password: z.string().min(1).max(128) }).parse(data))
   .handler(async ({ data }): Promise<Result<User>> => {
     const { callBackend, startSession } = await server();
     const result = await callBackend<{ token: string; user: User }>("/auth/login", "POST", data);
@@ -92,10 +90,10 @@ export const me = createServerFn({ method: "POST" }).handler(async (): Promise<R
 
 /** Forgot password: asks the shop for a new one. Nothing is sent; the site admin sets it at /admin. */
 export const forgotPassword = createServerFn({ method: "POST" })
-  .validator((data: unknown) => z.object({ email }).parse(data))
+  .validator((data: unknown) => z.object({ mobile }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<{ message: string }>("/auth/forgot-password", "POST", data));
 
-/** A shopkeeper signs in with her mobile number and the password an admin gave her (no email). */
+/** A shopkeeper signs in with her mobile number and the password an admin gave her. */
 export const shopkeeperLogin = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ phone: mobile, password: z.string().min(1).max(128) }).parse(data))
   .handler(async ({ data }): Promise<Result<User>> => {

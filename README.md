@@ -1,6 +1,6 @@
 # Kannagi Night Mart website
 
-The Kannagi Night Mart website, live at **https://kannagimart.tech**: the customer storefront, the shopkeeper dashboard (`/dashboard`: shop management, Manual sale for sales made in person, and a Summary of online, manual and total sales and profit) and the admin console (`/admin`, which includes the same dashboard). React 19 + TanStack Start, deployed on Vercel.
+The Kannagi Night Mart website, live at **https://kannagimart.tech**: the customer storefront (customers sign up and sign in with their mobile number and a password), the shopkeeper dashboard (`/dashboard`: shop management, Manual sale for sales made in person, and a Summary of online, manual and total sales and profit) and the admin console (`/admin`, which includes the same dashboard, Investment: new stock bought per day, week or month and the value of the stock left, and Profit: profit day by day and item by item, and the profit in the stock left). React 19 + TanStack Start, deployed on Vercel.
 
 ## How it talks to the API
 

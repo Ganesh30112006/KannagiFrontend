@@ -5,6 +5,7 @@ import type {
   AdminOrderStatus,
   AdminUserRole,
   CustomerProfile,
+  InvestmentPeriod,
   SiteSettings,
   StaffRole,
 } from "./mart-types";
@@ -16,6 +17,8 @@ export const adminApi = {
   me: () => unwrap(fn.adminMe()),
   login: (phone: string, password: string) => unwrap(fn.adminLogin({ data: { phone, password } })),
   overview: () => unwrap(fn.adminOverview()),
+  investment: (period: InvestmentPeriod) => unwrap(fn.adminInvestment({ data: { period } })),
+  profit: (period: InvestmentPeriod) => unwrap(fn.adminProfit({ data: { period } })),
   settings: () => unwrap(fn.adminSettings()),
   saveSettings: (settings: SiteSettings) => change(() => fn.saveAdminSettings({ data: settings })),
   addStaff: (phone: string, password: string, role: StaffRole) =>

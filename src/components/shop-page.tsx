@@ -380,7 +380,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/" }: 
       </header>
 
       <nav aria-label="View selector" className="sticky top-0 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur">
-        <div className={`mx-auto grid max-w-2xl ${adminUnlocked ? "grid-cols-3" : "grid-cols-2"} rounded-md border border-border bg-card p-1 shadow-sm`}>
+        <div className="mx-auto grid max-w-2xl grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-1 rounded-md border border-border bg-card p-1 shadow-sm">
           <Button variant={mode === "customer" ? "default" : "ghost"} className="h-auto min-h-9 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:px-4 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => { setMode("customer"); void navigate({ to: "/shop" }); }}><ShoppingBag /> Customer Shop</Button>
           <Button variant={mode === "history" ? "default" : "ghost"} className="h-auto min-h-9 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:px-4 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => setMode("history")}><History /> My Orders</Button>
           {adminUnlocked && <Button variant={mode === "admin" ? "default" : "ghost"} className="h-auto min-h-9 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:px-4 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={openDashboard}><LockKeyhole /> Shopkeeper</Button>}
@@ -793,7 +793,7 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
         <Button className="justify-self-start sm:justify-self-auto" onClick={() => (adding && page === "dashboard" ? setAdding(false) : openAddForm())}><PackagePlus /> {adding && page === "dashboard" ? "Close" : "Add item"}</Button>
       </div>
 
-      <div role="tablist" aria-label="Dashboard pages" className="mt-4 grid grid-cols-3 gap-1 rounded-md border border-border bg-card p-1">
+      <div role="tablist" aria-label="Dashboard pages" className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-1 rounded-md border border-border bg-card p-1">
         {DASHBOARD_PAGES.map(({ id, label, icon: Icon }) => (
           <Button key={id} role="tab" aria-selected={page === id} variant={page === id ? "default" : "ghost"} className="h-auto min-h-10 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => setPage(id)}>
             <Icon /> {label}
@@ -863,6 +863,7 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
       <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,.65fr)]">
         <section>
           <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-hand text-3xl font-bold">Inventory Management</h3><Button variant="secondary" onClick={openAddForm}><PackagePlus /> Add item</Button></div>
+          <p className="mt-1 text-xs text-muted-foreground">Stock you add (a new item&apos;s starting stock, + or a typed number) is recorded as new stock bought, and stock you take off as taken off. A mistake put right within 10 minutes isn&apos;t counted.</p>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {products.map((item) => (
               <article key={item.id} className="min-w-0 border-2 border-foreground/10 bg-card p-4 shadow-[3px_4px_0_var(--shadow-color)]">

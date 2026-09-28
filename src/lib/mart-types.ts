@@ -99,8 +99,8 @@ export type StoreStatus = { override: StoreOverride; online: boolean };
 
 export type CustomerProfile = { fullName: string; phone: string; block: Block; roomNumber: string };
 
-// Customers have an email; admins and shopkeepers have only a mobile number (and their own password).
-/** email: a customer's username (nothing is ever emailed); phone: an admin's or shopkeeper's sign-in number; mobile: a customer's number.
+// Everyone signs in with a mobile number and a password: customers with `mobile`, admins and shopkeepers with `phone`.
+/** mobile: a customer's number (her sign-in); phone: an admin's or shopkeeper's sign-in number; email: an older customer account's (no longer used).
  * isOwner: the main admin from the server settings (ADMIN_MOBILE), whose password is changed there. */
 export type User = {
   id: string;
@@ -233,9 +233,14 @@ export type SiteAdminSettings = SiteSettings & { photoUploadsEnabled: boolean };
 
 export type AdminUser = {
   id: string;
+  /** An older customer account's email (no longer used). */
   email?: string;
+  /** An admin's or shopkeeper's sign-in number. */
   phone?: string;
+  /** A customer's sign-in number. */
   mobile?: string;
+  /** A customer account (made by signing up); missing from an older API. */
+  isCustomer?: boolean;
   isShopkeeper: boolean;
   isAdmin: boolean;
   /** The main admin from the server settings: can't be deleted, blocked or given a new password at /admin. */
@@ -258,6 +263,8 @@ export type AdminOverview = {
   manualSalesToday?: number;
   /** Paid online orders and manual sales. */
   revenueToday: number;
+  /** The stock left, at MRP. */
+  stockValue?: number;
   openOrders: number;
   awaitingPayment: number;
   storeOnline: boolean;
@@ -268,3 +275,105 @@ export type AdminOverview = {
 export type AdminOrderStatus = "all" | "open" | "awaiting" | "fulfilled" | "cancelled";
 export type AdminUserRole = "all" | "customers" | "shopkeepers" | "admins" | "blocked" | "resets";
 export type StaffRole = "shopkeeper" | "admin";
+
+/** The Investment tab's periods, in the shop's dates. */
+export type InvestmentPeriod = "today" | "week" | "month" | "last_month" | "all";
+
+export type InvestmentItem = { name: string; emoji?: string; qty: number; value: number };
+
+/** Stock added (change > 0) or taken off by hand on the dashboard; quick changes by one person are one entry. */
+export type StockEntry = {
+  id: number;
+  createdAt: number;
+  name: string;
+  change: number;
+  /** MRP each at the time. */
+  price: number;
+  recordedBy?: string;
+};
+
+/** New stock bought (and taken off) in a period, and the stock left now, valued at MRP. */
+export type Investment = {
+  period: InvestmentPeriod;
+  /** The period's first day (YYYY-MM-DD, the shop's date); left out for all time. */
+  start?: string;
+  end: string;
+  /** When the first stock change was recorded; left out when none has been. */
+  trackingSince?: number;
+  bought: number;
+  boughtUnits: number;
+  boughtItems: InvestmentItem[];
+  takenOff: number;
+  takenOffUnits: number;
+  /** Newest first, at most the latest 200. */
+  entries: StockEntry[];
+  entryCount: number;
+  left: { items: number; units: number; value: number; saleValue: number };
+  leftItems: InvestmentItem[];
+};
+
+/** Sales added up on the Profit tab: profit is revenue - cost - gifts. */
+export type ProfitFigures = {
+  /** Sales: orders, manual sales, or both. */
+  count: number;
+  /** Units sold. */
+  items: number;
+  /** Money received. */
+  revenue: number;
+  /** What the items sold cost (their MRP). */
+  cost: number;
+  /** Free gifts given with orders, at their price. */
+  gifts: number;
+  profit: number;
+};
+
+export type ProfitDay = {
+  /** The shop's date (YYYY-MM-DD) the day starts on: see Profit.dayStartsAt. */
+  day: string;
+  orders: number;
+  manualSales: number;
+  revenue: number;
+  cost: number;
+  gifts: number;
+  profit: number;
+};
+
+/** An item sold (or in stock): revenue at the shop's prices, cost at MRP. */
+export type ProfitItem = {
+  name: string;
+  emoji?: string;
+  qty: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+};
+
+/** Profit in a period, day by day and item by item, and the profit in the stock left.
+ * itemProfit + deliveryFees - discounts + amountChanges - total.gifts = total.profit. */
+export type Profit = {
+  period: InvestmentPeriod;
+  /** The period's first day (YYYY-MM-DD); left out for all time. */
+  start?: string;
+  end: string;
+  /** The hour (shop's time) each day starts, halfway through the closed hours so a night stays in
+   * one day. Negative: that hour the evening before. */
+  dayStartsAt: number;
+  total: ProfitFigures;
+  online: ProfitFigures;
+  manual: ProfitFigures;
+  /** Every day of the period (all time: from the first sale), newest first. */
+  days: ProfitDay[];
+  /** Per item sold, most profit first. */
+  items: ProfitItem[];
+  itemProfit: number;
+  deliveryFees: number;
+  discounts: number;
+  /** Manual sales for another amount than the shop's prices: + more, - less. */
+  amountChanges: number;
+  /** UPI orders in the period whose payment isn't confirmed yet (not counted). */
+  awaiting: number;
+  awaitingMoney: number;
+  /** Right now, whatever the period. */
+  stock: { items: number; units: number; value: number; saleValue: number };
+  stockItems: ProfitItem[];
+};

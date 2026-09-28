@@ -1,8 +1,9 @@
 // The admin console at /admin: the whole shop and shopkeeper dashboard, shop details (UPI ID and
 // QR, contacts, pickup point, hours, payment and delivery options, prices, sign-ups), people
-// (customers, shopkeepers and admins: new passwords, blocking, deleting), every order, and access
-// (adding shopkeepers and admins, your own password). Admins sign in with their mobile number and
-// password. Nothing links here; the backend answers 404 to anyone without an admin session.
+// (customers, shopkeepers and admins: new passwords, blocking, deleting), every order, investment
+// (stock bought and the stock left), profit (day by day and item by item), and access (adding
+// shopkeepers and admins, your own password). Admins sign in with their mobile number and password.
+// Nothing links here; the backend answers 404 to anyone without an admin session.
 import { useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
@@ -22,9 +23,11 @@ import {
   ShieldCheck,
   Store,
   Trash2,
+  TrendingUp,
   UserCheck,
   UserPlus,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
@@ -42,13 +45,19 @@ import type {
   AdminUser,
   AdminUserRole,
   Block,
+  Investment,
+  InvestmentItem,
+  InvestmentPeriod,
+  Profit,
+  ProfitFigures,
+  ProfitItem,
   SiteAdminSettings,
   SiteSettings,
   StaffRole,
   User,
 } from "@/lib/mart-types";
 import { callLink, formatMobile, isMobile, whatsappChat } from "@/lib/phone";
-import { money } from "@/lib/pricing";
+import { money, toPaise, toRupees } from "@/lib/pricing";
 import { hourLabel } from "@/lib/site";
 import { readQrImage, upiProfileLink, upiQrName, upiQrPayee } from "@/lib/upi";
 
@@ -58,13 +67,16 @@ const UPI_ID = /^[A-Za-z0-9._-]{2,64}@[A-Za-z][A-Za-z0-9.-]{1,63}$/;
 const REFRESH_MS = 15_000;
 const orderLabel = (order: AdminOrder) => `#${String(order.orderNumber).padStart(4, "0")}`;
 
-type Tab = "overview" | "shop" | "details" | "people" | "orders" | "access";
+type Tab =
+  "overview" | "shop" | "details" | "people" | "orders" | "investment" | "profit" | "access";
 const TABS: { id: Tab; label: string; icon: typeof Store }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "shop", label: "Shop & dashboard", icon: Store },
   { id: "details", label: "Shop details", icon: Settings },
   { id: "people", label: "People", icon: Users },
   { id: "orders", label: "Orders", icon: ClipboardList },
+  { id: "investment", label: "Investment", icon: Wallet },
+  { id: "profit", label: "Profit", icon: TrendingUp },
   { id: "access", label: "Access", icon: KeyRound },
 ];
 
@@ -228,6 +240,8 @@ export function AdminConsole({ user }: { user: User }) {
           {tab === "orders" && (
             <OrdersTab customer={ordersOf} clearCustomer={() => setOrdersOf(null)} />
           )}
+          {tab === "investment" && <InvestmentTab />}
+          {tab === "profit" && <ProfitTab />}
           {tab === "access" && <AccessTab me={user} />}
           <Toaster position="top-center" richColors />
         </main>
@@ -283,6 +297,7 @@ function OverviewTab({ open }: { open: (tab: Tab, role?: AdminUserRole) => void 
         ["Orders today", overview.ordersToday, "orders"],
         ["Manual sales today", overview.manualSalesToday ?? 0, "shop"],
         ["Money in today (online + manual)", money(overview.revenueToday), "orders"],
+        ["Stock left (at MRP)", money(overview.stockValue ?? 0), "investment"],
         ["Open orders", overview.openOrders, "orders"],
         ["UPI payments to confirm", overview.awaitingPayment, "orders"],
         ["Password requests", overview.resetRequests, "people", "resets"],
@@ -306,10 +321,12 @@ function OverviewTab({ open }: { open: (tab: Tab, role?: AdminUserRole) => void 
             key={label}
             type="button"
             onClick={() => open(target, role)}
-            className={`rounded-lg border-2 border-dashed p-4 text-left hover:border-primary ${role === "resets" && Number(value) > 0 ? "border-primary bg-accent" : "border-primary/30 bg-card"}`}
+            className={`min-w-0 rounded-lg border-2 border-dashed p-4 text-left hover:border-primary ${role === "resets" && Number(value) > 0 ? "border-primary bg-accent" : "border-primary/30 bg-card"}`}
           >
             <p className="text-xs font-bold text-muted-foreground">{label}</p>
-            <p className="font-display text-2xl font-extrabold text-primary sm:text-3xl">{value}</p>
+            <p className="font-display text-xl font-extrabold text-primary [overflow-wrap:anywhere] sm:text-3xl">
+              {value}
+            </p>
           </button>
         ))}
       </div>
@@ -331,6 +348,14 @@ function OverviewTab({ open }: { open: (tab: Tab, role?: AdminUserRole) => void 
           <li>
             <b>Orders:</b> every order ever, searchable, with older ones a tap away: confirm
             payments, mark fulfilled, cancel.
+          </li>
+          <li>
+            <b>Investment:</b> new stock bought (today, the last 7 days, this month, last month or
+            all time) and what the stock left is worth, with every stock change and who made it.
+          </li>
+          <li>
+            <b>Profit:</b> profit day by day (a night&apos;s sales after midnight count with that
+            night) and item by item, online and manual, and the profit in the stock left.
           </li>
           <li>
             <b>Access:</b> add a shopkeeper or another admin (their mobile number and password), and
@@ -763,9 +788,17 @@ function suggestPassword(): string {
   return `${picks.slice(0, 4).join("")}-${picks.slice(4).join("")}`;
 }
 
-/** How a person is named on the page: a customer's email, or an admin's or shopkeeper's number. */
+/** A customer account (an older API doesn't say: then the ones with an email). */
+const isCustomer = (person: AdminUser) => person.isCustomer ?? Boolean(person.email);
+
+/** How a person is named on the page: a customer's name or number, or an admin's or shopkeeper's number. */
 const nameOf = (person: AdminUser) =>
-  person.email ?? (person.phone ? formatMobile(person.phone) : "Account");
+  isCustomer(person)
+    ? person.profile?.fullName ||
+      (person.mobile ? formatMobile(person.mobile) : (person.email ?? "Customer"))
+    : person.phone
+      ? formatMobile(person.phone)
+      : "Account";
 
 function PeopleTab({
   me,
@@ -836,7 +869,7 @@ function PeopleTab({
     const orders = person.orderCount
       ? `Their ${person.orderCount} past order${person.orderCount === 1 ? "" : "s"} stay in Orders. `
       : "";
-    const data = person.email ? ", hostel details, wishlist votes and coupons" : "";
+    const data = isCustomer(person) ? ", hostel details, wishlist votes and coupons" : "";
     if (
       !window.confirm(
         `Delete ${nameOf(person)}? ${orders}The account${data} are deleted, and it can't sign in again. This can't be undone.`,
@@ -876,7 +909,7 @@ function PeopleTab({
           <Input
             aria-label="Search people"
             className="pl-9"
-            placeholder="Email, name, mobile or room"
+            placeholder="Name, mobile or room"
             maxLength={100}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -885,8 +918,8 @@ function PeopleTab({
       </div>
       {role === "resets" && (
         <p className="mt-3 text-sm text-muted-foreground">
-          Customers who tapped &ldquo;Forgot password?&rdquo;. The shop sends no emails or codes:
-          set a new password here, then send it to her on WhatsApp or call her.
+          Customers who tapped &ldquo;Forgot password?&rdquo;. The shop sends no messages or codes
+          by itself: set a new password here, then send it to her on WhatsApp or call her.
         </p>
       )}
       {(role === "shopkeepers" || role === "admins") && (
@@ -918,7 +951,7 @@ function PeopleTab({
           return (
             <article
               key={person.id}
-              aria-label={person.email ?? person.phone ?? "Account"}
+              aria-label={person.mobile ?? person.phone ?? person.email ?? "Account"}
               className={`min-w-0 rounded-lg border-2 border-foreground/10 p-4 shadow-[3px_4px_0_var(--shadow-color)] [overflow-wrap:anywhere] ${person.blocked ? "bg-muted" : "bg-card"}`}
             >
               <div className="flex flex-wrap items-center gap-2">
@@ -951,7 +984,7 @@ function PeopleTab({
               </div>
               {person.mobile && (
                 <p className="mt-1 text-sm">
-                  Mobile{" "}
+                  Mobile (signs in with it){" "}
                   <a className="underline" href={callLink(person.mobile)}>
                     {formatMobile(person.mobile)}
                   </a>
@@ -963,7 +996,7 @@ function PeopleTab({
                   {person.profile.block}, Room {person.profile.roomNumber}
                 </p>
               ) : (
-                person.email && (
+                isCustomer(person) && (
                   <p className="mt-1 text-sm text-muted-foreground">No hostel details saved</p>
                 )
               )}
@@ -1089,7 +1122,7 @@ function PeopleTab({
                       Dismiss request
                     </Button>
                   )}
-                  {person.email && (
+                  {isCustomer(person) && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -1192,8 +1225,8 @@ function PasswordSetter({
 }
 
 /** After a password is set, or an account made: send it from this phone (the shop sends nothing by
- * itself). Customers get their email and password; shopkeepers and admins their number, password and
- * where to sign in. */
+ * itself). Customers get their new password; shopkeepers and admins their number, password and where
+ * to sign in. */
 function PasswordToGive({
   person,
   password,
@@ -1205,14 +1238,14 @@ function PasswordToGive({
   close: () => void;
   title?: string;
 }) {
-  const staff = !person.email;
+  const staff = !isCustomer(person);
   const mobile = staff ? (person.phone ?? "") : (person.mobile ?? person.profile?.phone ?? "");
   const signIn = person.isAdmin
     ? `${window.location.origin}/admin`
     : `${window.location.origin}/ (the Shopkeeper tab)`;
   const message = staff
     ? `Hi! Your Kannagi Night Mart ${person.isAdmin ? "admin" : "shopkeeper"} sign-in:\nMobile number: ${formatMobile(mobile)}\nPassword: ${password}\nSign in at ${signIn}`
-    : `Hi! Your Kannagi Night Mart password has been reset.\nSign in with ${person.email} and this new password: ${password}`;
+    : `Hi! Your Kannagi Night Mart password has been reset.\nSign in with your mobile number${person.mobile ? ` ${formatMobile(person.mobile)}` : ""} and this new password: ${password}`;
   const whatsapp = whatsappChat(mobile, message);
   const call = callLink(mobile);
   return (
@@ -1454,7 +1487,7 @@ function OrdersTab({
           <Input
             aria-label="Search all orders"
             className="pl-9"
-            placeholder="Order #, name, mobile, room, email or UTR"
+            placeholder="Order #, name, mobile, room or UTR"
             maxLength={100}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -1499,6 +1532,483 @@ function OrdersTab({
             {loadingOlder ? "Loading…" : "Show older orders"}
           </Button>
         </div>
+      )}
+    </>
+  );
+}
+
+// --- investment ---
+
+const PERIODS: [InvestmentPeriod, string][] = [
+  ["today", "Today"],
+  ["week", "Last 7 days"],
+  ["month", "This month"],
+  ["last_month", "Last month"],
+  ["all", "All time"],
+];
+/** 2026-09-01 (a shop date) as 1 Sep 2026. */
+const dayLabel = (day: string) =>
+  new Date(`${day}T00:00:00`).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+const changeTime = (ms: number) =>
+  new Date(ms).toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+const units = (count: number) => `${count} item${count === 1 ? "" : "s"}`;
+
+/** Items with how many and what they cost, biggest first. */
+function ValueList({
+  label,
+  items,
+  empty,
+}: {
+  label: string;
+  items: InvestmentItem[];
+  empty: string;
+}) {
+  if (!items.length) return <p className="text-sm text-muted-foreground">{empty}</p>;
+  return (
+    <ul
+      aria-label={label}
+      className="max-h-96 divide-y divide-border overflow-y-auto rounded-md border border-border"
+    >
+      {items.map((item) => (
+        // A long name and a big amount: the amount goes under the name rather than squeezing it.
+        <li
+          key={item.name}
+          className="flex flex-wrap items-baseline justify-between gap-x-3 p-2 text-sm"
+        >
+          <span className="min-w-0 grow basis-32 [overflow-wrap:anywhere]">
+            {item.emoji ? `${item.emoji} ` : ""}
+            <b>{item.name}</b> × {item.qty}
+          </span>
+          <span className="ml-auto shrink-0 font-bold tabular-nums">{money(item.value)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function InvestmentTab() {
+  const [period, setPeriod] = useState<InvestmentPeriod>("month");
+  const [loaded] = useAdminData<Investment>(() => adminApi.investment(period), [period]);
+  const data = loaded?.period === period ? loaded : null; // not the last period's figures while a new one loads
+  const dates = data
+    ? data.start
+      ? data.start === data.end
+        ? dayLabel(data.start)
+        : `${dayLabel(data.start)} – ${dayLabel(data.end)}`
+      : `All time, up to ${dayLabel(data.end)}`
+    : "";
+  // Stock changes are recorded from the first one after this was added: purchases before it aren't here.
+  const since = data?.trackingSince;
+  const partly =
+    since !== undefined &&
+    data?.start !== undefined &&
+    new Date(`${data.start}T00:00:00`).getTime() < since;
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">
+        What went into stock, at MRP (what the shop pays). New stock bought is the stock added on
+        the dashboard: a new item&apos;s starting stock, + and typed numbers. Changes to one item by
+        the same person within 10 minutes count as one, so a mistake put right at once isn&apos;t
+        counted.
+      </p>
+      <div role="group" aria-label="Period" className="mt-4 flex flex-wrap gap-1">
+        {PERIODS.map(([value, label]) => (
+          <Button
+            key={value}
+            size="sm"
+            variant={period === value ? "default" : "outline"}
+            aria-pressed={period === value}
+            onClick={() => setPeriod(value)}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+      {!data ? (
+        <p className="mt-6 text-muted-foreground">Loading…</p>
+      ) : (
+        <>
+          <p className="mt-3 text-sm font-bold">{dates}</p>
+          {since === undefined ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              No stock changes recorded yet: new stock counts from the next time stock is added on
+              the dashboard.
+            </p>
+          ) : (
+            partly && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Stock changes are recorded from {changeTime(since)}; stock bought before then
+                isn&apos;t included.
+              </p>
+            )
+          )}
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <article
+              aria-label="New stock bought"
+              className="min-w-0 rounded-lg border-2 border-primary bg-card p-4 shadow-[4px_5px_0_var(--shadow-color)]"
+            >
+              <h2 className="font-hand text-xl font-bold">New stock bought</h2>
+              <p className="[overflow-wrap:anywhere] font-display text-2xl font-extrabold sm:text-3xl text-primary">
+                {money(data.bought)}
+              </p>
+              <p className="text-sm">{units(data.boughtUnits)}, at MRP</p>
+            </article>
+            <article
+              aria-label="Stock left now"
+              className="min-w-0 rounded-lg border-2 border-dashed border-primary/30 bg-card p-4"
+            >
+              <h2 className="font-hand text-xl font-bold">Stock left now</h2>
+              <p className="[overflow-wrap:anywhere] font-display text-2xl font-extrabold sm:text-3xl text-primary">
+                {money(data.left.value)}
+              </p>
+              <p className="text-sm">
+                {units(data.left.units)} ({data.left.items} kind{data.left.items === 1 ? "" : "s"}),
+                at MRP. Worth {money(data.left.saleValue)} at shop prices.
+              </p>
+            </article>
+            <article
+              aria-label="Stock taken off"
+              className="min-w-0 rounded-lg border-2 border-dashed border-primary/30 bg-card p-4"
+            >
+              <h2 className="font-hand text-xl font-bold">Stock taken off</h2>
+              <p className="[overflow-wrap:anywhere] font-display text-2xl font-extrabold sm:text-3xl">
+                {money(data.takenOff)}
+              </p>
+              <p className="text-sm">
+                {units(data.takenOffUnits)} taken off by hand or deleted with their item.
+              </p>
+            </article>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Stock left is right now, whatever the period. Sales, cancelled orders and undone sales
+            change the stock left but aren&apos;t stock bought or taken off. Eggs at shop prices
+            count at MRP each (their markup is per order).
+          </p>
+          <div className="grid grid-cols-1 gap-x-5 lg:grid-cols-2">
+            <Section title="Bought in this period">
+              <ValueList
+                label="Bought in this period"
+                items={data.boughtItems}
+                empty="No new stock recorded in this period."
+              />
+            </Section>
+            <Section title="Stock left now">
+              <ValueList label="Stock left now" items={data.leftItems} empty="Nothing in stock." />
+            </Section>
+          </div>
+          <Section
+            title="Stock changes"
+            note={
+              data.entryCount > data.entries.length
+                ? `The latest ${data.entries.length} of ${data.entryCount} in this period.`
+                : undefined
+            }
+          >
+            {data.entries.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No stock changes in this period.</p>
+            ) : (
+              <ul
+                aria-label="Stock changes"
+                className="max-h-[32rem] divide-y divide-border overflow-y-auto rounded-md border border-border"
+              >
+                {data.entries.map((entry) => (
+                  <li
+                    key={entry.id}
+                    className="flex flex-wrap items-baseline justify-between gap-x-3 p-2 text-sm"
+                  >
+                    <span className="min-w-0 grow basis-32 [overflow-wrap:anywhere]">
+                      <b className={entry.change > 0 ? "text-primary" : ""}>
+                        {entry.change > 0 ? `+${entry.change}` : `−${-entry.change}`}
+                      </b>{" "}
+                      {entry.name} at {money(entry.price)}
+                    </span>
+                    <span className="ml-auto shrink-0 font-bold tabular-nums">
+                      {entry.change > 0 ? "" : "−"}
+                      {money(toRupees(toPaise(entry.price) * Math.abs(entry.change)))}
+                    </span>
+                    <span className="basis-full text-xs text-muted-foreground">
+                      {changeTime(entry.createdAt)}
+                      {entry.recordedBy ? ` · by ${formatMobile(entry.recordedBy)}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        </>
+      )}
+    </>
+  );
+}
+
+// --- profit ---
+
+const DAYS_SHOWN = 31;
+const signedMoney = (rupees: number) => (rupees < 0 ? `−${money(-rupees)}` : money(rupees));
+/** +₹20, −₹3.50 or ₹0: what a line adds to the profit. */
+const changeMoney = (rupees: number) =>
+  rupees === 0 ? money(0) : rupees < 0 ? `−${money(-rupees)}` : `+${money(rupees)}`;
+const profitColor = (rupees: number) => (rupees < 0 ? "text-destructive" : "text-primary");
+const howMany = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
+/** 2026-09-28 as Mon, 28 Sep (with the year when it isn't `year`). */
+const weekdayLabel = (day: string, year: string) =>
+  new Date(`${day}T00:00:00`).toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(day.startsWith(year) ? {} : { year: "numeric" }),
+  });
+/** When each day starts: 12 → "from 12:00 PM to 12:00 PM the next day"; 0 (midnight) needs no words. */
+const dayRuns = (startsAt: number) => {
+  if (startsAt === 0) return null;
+  const hour = hourLabel((startsAt + 24) % 24);
+  return startsAt > 0
+    ? `from ${hour} to ${hour} the next day`
+    : `from ${hour} the day before to ${hour}`;
+};
+const moneyLine = (figures: Pick<ProfitFigures, "revenue" | "cost" | "gifts">) =>
+  `${money(figures.revenue)} in − ${money(figures.cost)} cost${figures.gifts ? ` − ${money(figures.gifts)} gifts` : ""}`;
+
+function FiguresCard({
+  label,
+  figures,
+  noun,
+  main,
+}: {
+  label: string;
+  figures: ProfitFigures;
+  noun: string;
+  main?: boolean;
+}) {
+  return (
+    <article
+      aria-label={label}
+      className={`min-w-0 rounded-lg border-2 bg-card p-4 ${main ? "border-primary shadow-[4px_5px_0_var(--shadow-color)]" : "border-dashed border-primary/30"}`}
+    >
+      <h2 className="font-hand text-xl font-bold">{label}</h2>
+      <p
+        className={`[overflow-wrap:anywhere] font-display text-2xl font-extrabold sm:text-3xl ${profitColor(figures.profit)}`}
+      >
+        {signedMoney(figures.profit)}
+      </p>
+      <p className="text-sm [overflow-wrap:anywhere]">
+        {howMany(figures.count, noun)}, {howMany(figures.items, "item")}: {moneyLine(figures)}.
+      </p>
+    </article>
+  );
+}
+
+/** Items with what they made, most profit first. */
+function ProfitList({
+  label,
+  items,
+  empty,
+  detail,
+}: {
+  label: string;
+  items: ProfitItem[];
+  empty: string;
+  detail: (item: ProfitItem) => string;
+}) {
+  if (!items.length) return <p className="text-sm text-muted-foreground">{empty}</p>;
+  return (
+    <ul
+      aria-label={label}
+      className="max-h-96 divide-y divide-border overflow-y-auto rounded-md border border-border"
+    >
+      {items.map((item) => (
+        <li
+          key={item.name}
+          className="flex flex-wrap items-baseline justify-between gap-x-3 p-2 text-sm"
+        >
+          <span className="min-w-0 grow basis-32 [overflow-wrap:anywhere]">
+            {item.emoji ? `${item.emoji} ` : ""}
+            <b>{item.name}</b> × {item.qty}
+          </span>
+          <span className={`ml-auto shrink-0 font-bold tabular-nums ${profitColor(item.profit)}`}>
+            {signedMoney(item.profit)}
+          </span>
+          <span className="basis-full text-xs text-muted-foreground">{detail(item)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ProfitTab() {
+  const [period, setPeriod] = useState<InvestmentPeriod>("month");
+  const [allDays, setAllDays] = useState(false);
+  const [loaded] = useAdminData<Profit>(() => adminApi.profit(period), [period]);
+  const data = loaded?.period === period ? loaded : null; // not the last period's figures while a new one loads
+  const dates = data
+    ? data.start
+      ? data.start === data.end
+        ? dayLabel(data.start)
+        : `${dayLabel(data.start)} – ${dayLabel(data.end)}`
+      : `All time, up to ${dayLabel(data.end)}`
+    : "";
+  const runs = data ? dayRuns(data.dayStartsAt) : null;
+  const days = data ? (allDays ? data.days : data.days.slice(0, DAYS_SHOWN)) : [];
+  const year = data ? data.end.slice(0, 4) : "";
+  const stockProfit = data
+    ? toRupees(toPaise(data.stock.saleValue) - toPaise(data.stock.value))
+    : 0;
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">
+        Profit is the money received minus what the items sold cost (their MRP) and the free gifts
+        given with orders. Online orders and manual sales both count, UPI orders once their payment
+        is confirmed. Cancelled orders and undone manual sales don&apos;t count.
+      </p>
+      <div role="group" aria-label="Period" className="mt-4 flex flex-wrap gap-1">
+        {PERIODS.map(([value, label]) => (
+          <Button
+            key={value}
+            size="sm"
+            variant={period === value ? "default" : "outline"}
+            aria-pressed={period === value}
+            onClick={() => {
+              setPeriod(value);
+              setAllDays(false);
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+      {!data ? (
+        <p className="mt-6 text-muted-foreground">Loading…</p>
+      ) : (
+        <>
+          <p className="mt-3 text-sm font-bold">{dates}</p>
+          {runs && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Each day runs {runs} (halfway through the hours the shop is closed), so a night&apos;s
+              sales after midnight count with that night.
+            </p>
+          )}
+          {data.awaiting > 0 && (
+            <p className="mt-2 rounded-md border-2 border-dashed border-primary/40 bg-accent p-2 text-sm">
+              {howMany(data.awaiting, "UPI order")} ({money(data.awaitingMoney)}) in this period{" "}
+              {data.awaiting === 1 ? "is" : "are"} waiting for the payment to be confirmed (Orders).{" "}
+              {data.awaiting === 1 ? "It counts" : "They count"} once confirmed.
+            </p>
+          )}
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <FiguresCard label="Profit" figures={data.total} noun="sale" main />
+            <FiguresCard label="Online orders" figures={data.online} noun="order" />
+            <FiguresCard label="Manual sales" figures={data.manual} noun="sale" />
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Gifts are the free ₹5 chocolates, free picks (at their MRP) and ₹10 snacks given with
+            orders. The dashboard&apos;s Summary doesn&apos;t take gifts off, so its profit can be a
+            little higher.
+          </p>
+          <Section
+            title="Profit each day"
+            note={
+              data.days.length > days.length
+                ? `The latest ${days.length} of ${data.days.length} days.`
+                : "Newest first."
+            }
+          >
+            <ul
+              aria-label="Profit each day"
+              className="divide-y divide-border rounded-md border border-border"
+            >
+              {days.map((day) => {
+                const sales = [
+                  day.orders ? howMany(day.orders, "order") : "",
+                  day.manualSales ? howMany(day.manualSales, "manual sale") : "",
+                ].filter(Boolean);
+                return (
+                  <li
+                    key={day.day}
+                    className="flex flex-wrap items-baseline justify-between gap-x-3 p-2 text-sm"
+                  >
+                    <span className="min-w-0 grow basis-32 font-bold">
+                      {weekdayLabel(day.day, year)}
+                    </span>
+                    <span
+                      className={`ml-auto shrink-0 font-bold tabular-nums ${sales.length ? profitColor(day.profit) : "text-muted-foreground"}`}
+                    >
+                      {sales.length ? signedMoney(day.profit) : "—"}
+                    </span>
+                    <span className="basis-full text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                      {sales.length ? `${sales.join(" + ")} · ${moneyLine(day)}` : "No sales"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            {data.days.length > days.length && (
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => setAllDays(true)}>
+                Show all {data.days.length} days
+              </Button>
+            )}
+          </Section>
+          <div className="grid grid-cols-1 gap-x-5 lg:grid-cols-2">
+            <Section
+              title="Profit on each item"
+              note="Each item at the shop's prices (eggs: MRP each plus the markup once per sale), minus its MRP."
+            >
+              <ProfitList
+                label="Profit on each item"
+                items={data.items}
+                empty="Nothing sold in this period."
+                detail={(item) => `sold for ${money(item.revenue)}, cost ${money(item.cost)}`}
+              />
+              <dl
+                aria-label="From the items' profit to the profit"
+                className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-sm"
+              >
+                <dt>Items&apos; profit</dt>
+                <dd className="text-right tabular-nums">{signedMoney(data.itemProfit)}</dd>
+                <dt>Room delivery fees</dt>
+                <dd className="text-right tabular-nums">{changeMoney(data.deliveryFees)}</dd>
+                <dt>Discounts (offers, coupons, first orders)</dt>
+                <dd className="text-right tabular-nums">{changeMoney(-data.discounts)}</dd>
+                <dt>Manual sales for another amount</dt>
+                <dd className="text-right tabular-nums">{changeMoney(data.amountChanges)}</dd>
+                <dt>Free gifts</dt>
+                <dd className="text-right tabular-nums">{changeMoney(-data.total.gifts)}</dd>
+                <dt className="border-t border-border pt-1 font-bold">Profit</dt>
+                <dd
+                  className={`border-t border-border pt-1 text-right font-bold tabular-nums ${profitColor(data.total.profit)}`}
+                >
+                  {signedMoney(data.total.profit)}
+                </dd>
+              </dl>
+            </Section>
+            <Section title="Profit in the stock left" note="Right now, whatever the period.">
+              <p className="mb-3 text-sm [overflow-wrap:anywhere]">
+                If the {howMany(data.stock.units, "item")} left all sell at the shop&apos;s prices,
+                they bring in {money(data.stock.saleValue)} for stock that cost{" "}
+                {money(data.stock.value)}:{" "}
+                <b className={profitColor(stockProfit)}>{signedMoney(stockProfit)}</b> profit.
+              </p>
+              <ProfitList
+                label="Profit in the stock left"
+                items={data.stockItems}
+                empty="Nothing in stock."
+                detail={(item) => `worth ${money(item.revenue)}, cost ${money(item.cost)}`}
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                Eggs show no profit here: their markup is added once per sale, however many are
+                bought.
+              </p>
+            </Section>
+          </div>
+        </>
       )}
     </>
   );
