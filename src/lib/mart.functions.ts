@@ -5,6 +5,8 @@ import { z } from "zod";
 
 import type {
   AdminOrder,
+  AlertKey,
+  AlertTest,
   Bootstrap,
   CustomerProfile,
   KnownRevs,
@@ -37,7 +39,20 @@ const couponRule = z.enum(["best", "coupon"]);
 const promotions = z.object({
   launchMessage: z.string().max(200),
   dailyOffers: z
-    .array(z.object({ id: z.enum(["tier50", "tier100", "first", "bulk"]), title: z.string().max(80), note: z.string().max(200), icon: z.string().max(16), active: z.boolean() }))
+    .array(
+      z.object({
+        id: z.enum(["tier50", "tier100", "first", "bulk"]),
+        title: z.string().max(80),
+        note: z.string().max(200),
+        icon: z.string().max(16),
+        active: z.boolean(),
+        // What checkout gives (see DailyOffer in mart-types.ts).
+        percent: z.number().int().min(0).max(100).nullish(),
+        freeDelivery: z.boolean().nullish(),
+        gift: z.number().int().min(0).max(1000).nullish(),
+        pickUpTo: z.number().int().min(1).max(1000).nullish(),
+      }),
+    )
     .max(4),
   wheelPrizes: z
     .array(z.object({ code: text(20), label: text(80), shortLabel: z.string().max(80), icon: z.string().max(16), kind: couponKind.nullable(), active: z.boolean() }))
@@ -229,3 +244,22 @@ export const undoManualSale = createServerFn({ method: "POST" })
 export const setStore = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ override: z.enum(["auto", "online", "offline"]) }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<StoreStatus>("/admin/store", "PUT", data));
+
+// --- order alerts on this device (shopkeepers and admins; see order-alerts.ts) ---
+
+// A browser's push address (the backend accepts only the browsers' push services).
+const endpoint = z.object({ endpoint: z.string().trim().url().max(1000) });
+
+export const getAlertKey = createServerFn({ method: "POST" }).handler(async () => (await server()).callBackend<AlertKey>("/alerts/key"));
+
+export const turnOnAlerts = createServerFn({ method: "POST" })
+  .validator((data: unknown) => endpoint.extend({ keys: z.object({ p256dh: z.string().trim().min(1).max(200), auth: z.string().trim().min(1).max(100) }) }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<null>("/alerts/device", "PUT", data));
+
+export const turnOffAlerts = createServerFn({ method: "POST" })
+  .validator((data: unknown) => endpoint.parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<null>("/alerts/device/off", "POST", data));
+
+export const testAlert = createServerFn({ method: "POST" })
+  .validator((data: unknown) => endpoint.parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<AlertTest>("/alerts/test", "POST", data));

@@ -70,12 +70,22 @@ export type PlaceOrderInput = {
   expectedTotal?: number;
 };
 
+/** An offer card: its text, and what checkout gives (pricing.ts quote). An amount not set (null or left
+ * out) works as it always has, in brackets. */
 export type DailyOffer = {
   id: "tier50" | "tier100" | "first" | "bulk";
   title: string;
   note: string;
   icon: string;
   active: boolean;
+  /** % off: first order (10), cart over ₹200 (20). */
+  percent?: number | null;
+  /** Cart over ₹200: no room delivery fee (no). */
+  freeDelivery?: boolean | null;
+  /** A free chocolate worth ₹: ₹50+ (5), cart over ₹200 (none). */
+  gift?: number | null;
+  /** ₹100+: a free item she picks, MRP up to ₹ (a ₹10 item: MRP up to ₹12). */
+  pickUpTo?: number | null;
 };
 export type WheelPrize = {
   code: string;
@@ -377,3 +387,12 @@ export type Profit = {
   stock: { items: number; units: number; value: number; saleValue: number };
   stockItems: ProfitItem[];
 };
+
+/** Order alerts: a notification on a shopkeeper's or admin's device for each new order (order-alerts.ts). */
+export type AlertKey = {
+  /** What the browser turns alerts on with; null: alerts aren't set up on the server. */
+  publicKey: string | null;
+};
+/** One browser's push subscription (PushSubscription.toJSON()). */
+export type AlertDevice = { endpoint: string; keys: { p256dh: string; auth: string } };
+export type AlertTest = { sent: boolean; detail?: string };

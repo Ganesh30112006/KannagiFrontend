@@ -43,7 +43,12 @@ export const change = <T>(call: () => Promise<Result<T>>) => write(() => unwrap(
 export const api = {
   signup: (mobile: string, password: string) => unwrap(fn.signup({ data: { mobile, password } })),
   login: (mobile: string, password: string) => unwrap(fn.login({ data: { mobile, password } })),
-  logout: () => unwrap(fn.logout()),
+  /** Signing out also turns this device's order alerts off (for up to 3 seconds; then it signs out anyway). */
+  logout: async () => {
+    const alertsOff = import("./order-alerts").then((alerts) => alerts.forgetThisDevice());
+    await Promise.race([alertsOff.catch(() => undefined), new Promise((done) => setTimeout(done, 3000))]);
+    return unwrap(fn.logout());
+  },
   /** The signed-in user, or null. */
   me: () => unwrap(fn.me()),
   shopkeeperLogin: (phone: string, password: string) => unwrap(fn.shopkeeperLogin({ data: { phone, password } })),

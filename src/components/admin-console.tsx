@@ -37,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { adminApi, ORDER_PAGE } from "@/lib/admin-api";
 import { api, SIGNED_OUT } from "@/lib/api";
+import { alertsState } from "@/lib/order-alerts";
 import { staleSince, useLiveSync, writeMark } from "@/lib/live-sync";
 import type {
   AdminOrder,
@@ -182,6 +183,12 @@ export function AdminConsole({ user }: { user: User }) {
     window.addEventListener(SIGNED_OUT, backToSignIn);
     return () => window.removeEventListener(SIGNED_OUT, backToSignIn);
   }, [router]);
+
+  // Order alerts on this device follow the admin's sign-in, which lasts 12 hours: signing in again here
+  // keeps them going, without opening the shop dashboard.
+  useEffect(() => {
+    void alertsState().catch(() => undefined);
+  }, []);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -1909,9 +1916,9 @@ function ProfitTab() {
             <FiguresCard label="Manual sales" figures={data.manual} noun="sale" />
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Gifts are the free ₹5 chocolates, free picks (at their MRP) and ₹10 snacks given with
-            orders. The dashboard&apos;s Summary doesn&apos;t take gifts off, so its profit can be a
-            little higher.
+            Gifts are the free chocolates, free picks (at their MRP) and free snacks the offers give
+            with orders. The dashboard&apos;s Summary doesn&apos;t take gifts off, so its profit can
+            be a little higher.
           </p>
           <Section
             title="Profit each day"

@@ -38,13 +38,14 @@ import weekendMovieGirls from "@/assets/weekend-movie-girls.webp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ManualSalePanel, SalesSummaryPanel } from "@/components/sales-panels";
+import { OrderAlertsCard } from "@/components/order-alerts-card";
 import { api, ApiError } from "@/lib/api";
 import { staleSince, useLiveSync, writeMark } from "@/lib/live-sync";
 import { ROLE_KEY } from "@/lib/login-role";
 import { callLink, formatMobile, isMobile, whatsappChat } from "@/lib/phone";
 import { DEFAULT_SITE, hoursLabel, priceRules, shopWhatsApp, SiteContext, spacedPhone, useSite } from "@/lib/site";
 import { upiPayLink } from "@/lib/upi";
-import { cartSummary, couponStatus, FREE_PICK_MAX_PRICE, isEggProduct, lineTotal, money, quote, toRupees } from "@/lib/pricing";
+import { cartSummary, couponStatus, FREE_PICK_MAX_PRICE, FREE_PICK_VALUE, isEggProduct, lineTotal, money, OFFER_DEFAULTS, quote, toRupees } from "@/lib/pricing";
 import type {
   AdminOrder,
   Block,
@@ -820,6 +821,8 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
         </form>
       )}
 
+      <OrderAlertsCard />
+
       <section className="mt-5 border-2 border-dashed border-primary/35 bg-card p-4 shadow-[4px_5px_0_var(--shadow-color)]">
         <h3 className="font-hand text-2xl font-bold">Store status</h3>
         <p className="mt-1 text-sm text-muted-foreground">Auto follows shop hours ({hoursLabel(site)}). Right now customers see: <b>{storeOnline ? "Online" : "Offline / on request"}</b>.</p>
@@ -844,8 +847,9 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
         </label>
         <h4 className="mt-5 font-hand text-xl font-bold">Daily offer cards</h4>
         <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
-          {dailyOffers.map((offer, index) => <article key={offer.id} className="grid min-w-0 gap-2 rounded-md border border-border bg-background p-3"><div className="grid grid-cols-[4rem_1fr] gap-2"><Input aria-label={`${offer.id} icon`} maxLength={16} value={offer.icon} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, icon: event.target.value } : item))} /><Input aria-label={`${offer.id} title`} maxLength={80} value={offer.title} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} /></div><Input aria-label={`${offer.id} description`} maxLength={200} value={offer.note} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, note: event.target.value } : item))} /><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={offer.active} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))} /> Show this offer</label></article>)}
+          {dailyOffers.map((offer, index) => <article key={offer.id} className="grid min-w-0 gap-2 rounded-md border border-border bg-background p-3"><div className="grid grid-cols-[4rem_1fr] gap-2"><Input aria-label={`${offer.id} icon`} maxLength={16} value={offer.icon} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, icon: event.target.value } : item))} /><Input aria-label={`${offer.id} title`} maxLength={80} value={offer.title} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} /></div><Input aria-label={`${offer.id} description`} maxLength={200} value={offer.note} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, note: event.target.value } : item))} /><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={offer.active} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))} /> Show this offer</label><OfferAmounts offer={offer} change={(patch) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))} /></article>)}
         </div>
+        <p className="mt-2 text-xs text-muted-foreground">Customers read each card&apos;s text; checkout gives the amounts under it. Keep the two saying the same.</p>
         <h4 className="mt-5 font-hand text-xl font-bold">Spin wheel slices</h4>
         <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
            {wheelRewards.map((reward, index) => <article key={`${reward.code}-${index}`} className="grid min-w-0 gap-2 rounded-md border border-border bg-background p-3"><div className="grid grid-cols-[4rem_1fr] gap-2"><Input aria-label={`${reward.code} icon`} maxLength={16} value={reward.icon} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, icon: event.target.value } : item))} /><Input aria-label={`${reward.code} offer text`} maxLength={80} value={reward.label} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value, shortLabel: event.target.value } : item))} /></div><select aria-label={`${reward.code} reward rule`} value={reward.kind ?? "luck"} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, kind: event.target.value === "luck" ? null : event.target.value as CouponKind } : item))} className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm"><option value="free60">Free delivery on ₹60+</option><option value="three5">₹5 off any 3 items</option><option value="freeSnack100">Free ₹10 snack on ₹100+</option><option value="halfDelivery">50% off room delivery</option><option value="four10">₹10 off any 4 items</option><option value="premium5">₹5 off 2 premium items</option><option value="luck">Better Luck Next Time</option></select><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={reward.active} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))} /> Active slice</label></article>)}
@@ -915,6 +919,68 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
       </>)}
     </div>
   );
+}
+
+/** What an offer card gives at checkout (see quote in lib/pricing.ts), under its text. */
+function OfferAmounts({ offer, change }: { offer: DailyOffer; change: (patch: Partial<DailyOffer>) => void }) {
+  const amount = (label: string, field: "percent" | "gift" | "pickUpTo", value: number, min: number, max: number) => (
+    <label className="grid gap-1 text-xs font-bold">
+      {label}
+      <Input
+        key={value}
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step="1"
+        aria-label={`${offer.id} ${label}`}
+        defaultValue={value}
+        // Kept when leaving the box (tapping Save does that first); anything but a whole number in range goes back.
+        onBlur={(event) => {
+          const n = Number(event.target.value);
+          if (!event.target.value.trim() || !Number.isInteger(n) || n < min || n > max) { event.target.value = String(value); toast.error(`${label}: enter a whole number from ${min} to ${max}.`); return; }
+          if (n !== value) change({ [field]: n });
+        }}
+      />
+    </label>
+  );
+  const gives = offerGives(offer);
+  return (
+    <div className="grid gap-2 rounded-md border border-dashed border-primary/30 bg-card p-2">
+      <p className="text-xs font-bold text-primary">Checkout gives: {gives}</p>
+      {offer.id === "first" && amount("Discount (%)", "percent", offer.percent ?? OFFER_DEFAULTS.firstPercent, 0, 100)}
+      {offer.id === "bulk" && (
+        <div className="grid grid-cols-2 gap-2">
+          {amount("Discount (%)", "percent", offer.percent ?? OFFER_DEFAULTS.bulkPercent, 0, 100)}
+          {amount("Free chocolate (₹, 0 = none)", "gift", offer.gift ?? 0, 0, 1000)}
+          <label className="col-span-2 flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={Boolean(offer.freeDelivery)} onChange={(event) => change({ freeDelivery: event.target.checked })} /> Free room delivery</label>
+        </div>
+      )}
+      {offer.id === "tier50" && amount("Free chocolate (₹, 0 = none)", "gift", offer.gift ?? OFFER_DEFAULTS.tier50Gift, 0, 1000)}
+      {offer.id === "tier100" && amount("Free pick: any item with MRP up to (₹)", "pickUpTo", offer.pickUpTo ?? FREE_PICK_VALUE, 1, 1000)}
+    </div>
+  );
+}
+
+/** In words, what checkout gives for an offer card (its amounts, not its text). */
+function offerGives(offer: DailyOffer): string {
+  const rupees = (value: number) => `₹${value}`;
+  switch (offer.id) {
+    case "first":
+      return `${offer.percent ?? OFFER_DEFAULTS.firstPercent}% off a customer's first order`;
+    case "bulk": {
+      const parts = [
+        (offer.percent ?? OFFER_DEFAULTS.bulkPercent) > 0 ? `${offer.percent ?? OFFER_DEFAULTS.bulkPercent}% off` : "",
+        offer.freeDelivery ? "free room delivery" : "",
+        offer.gift ? `a free ${rupees(offer.gift)} chocolate` : "",
+      ].filter(Boolean);
+      return `on carts over ₹200: ${parts.length ? parts.join(" + ") : "nothing (set an amount)"}`;
+    }
+    case "tier50":
+      return (offer.gift ?? OFFER_DEFAULTS.tier50Gift) > 0 ? `a free ${rupees(offer.gift ?? OFFER_DEFAULTS.tier50Gift)} chocolate from ₹50` : "nothing (set an amount)";
+    case "tier100":
+      return offer.pickUpTo == null ? "a free item she picks, MRP up to ₹12, from ₹100" : `a free item she picks, MRP up to ${rupees(offer.pickUpTo)}, from ₹100`;
+  }
 }
 
 type DashboardPage = "dashboard" | "manual" | "summary";
@@ -1237,7 +1303,8 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
   const discount = toRupees(priced.discount);
   const total = toRupees(priced.total);
   // Items she could take free: cheap enough, and still in stock after her own cart.
-  const freeChoices = products.filter((item) => item.mrp <= FREE_PICK_MAX_PRICE && item.stock - (cartItems.find((line) => line.id === item.id)?.qty ?? 0) > 0);
+  const pickUpTo = best?.pickUpTo ?? FREE_PICK_MAX_PRICE;
+  const freeChoices = products.filter((item) => item.mrp <= pickUpTo && item.stock - (cartItems.find((line) => line.id === item.id)?.qty ?? 0) > 0);
   const couponCheck = couponStatus(coupon, cartSummary(lines, rules), delivery);
   const couponApplied = best?.kind === "coupon";
 
@@ -1246,8 +1313,9 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
     previousDeal.current = best?.kind;
   }, [best]);
 
-  const getsTenSnack = Boolean(best?.freePick);
-  const getsFiveChocolate = best?.kind === "tier50";
+  const getsFreePick = Boolean(best?.freePick);
+  const gift = best?.gift ?? 0;
+  const freeDelivery = Boolean(best?.freeDelivery);
 
   // The server re-checks stock, prices, offers and the coupon; this only sends what the customer chose.
   const placeOrder = useCallback(async () => {
@@ -1263,14 +1331,14 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
         items: cartItems.map((item) => ({ productId: item.id, quantity: item.qty })),
         delivery,
         payment,
-        ...(getsTenSnack && freeItem ? { freePick: freeItem } : {}),
+        ...(getsFreePick && freeItem ? { freePick: freeItem } : {}),
         ...(delivery === "Room Delivery" ? { name: name.trim(), phone: phone.trim(), block, room: room.trim() } : {}),
         expectedTotal: total,
       });
     } finally {
       setPlacing(false);
     }
-  }, [block, cartItems, delivery, freeItem, getsTenSnack, name, onComplete, payment, phone, placing, room, total]);
+  }, [block, cartItems, delivery, freeItem, getsFreePick, name, onComplete, payment, phone, placing, room, total]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/50 backdrop-blur-sm sm:items-center sm:p-6" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -1292,13 +1360,14 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
 
             {coupon && <div className={`mt-4 rounded-md border-2 border-dashed p-3 text-sm font-bold ${couponApplied ? "border-stock bg-stock text-stock-foreground" : "border-primary/30 bg-banner text-foreground"}`}><p>{coupon.icon} {coupon.label}</p><p className="mt-1 text-xs font-semibold">{couponCheck.eligible && !couponApplied ? `Saved for later: ${best?.label ?? "another offer"} saves you more on this order.` : couponCheck.reason}</p>{!couponCheck.eligible && <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => toast.info(couponCheck.reason)}>Check coupon</Button>}</div>}
 
-            {(getsFiveChocolate || getsTenSnack) && (
+            {(gift > 0 || freeDelivery || getsFreePick) && (
               <div className="mt-4 border-2 border-dashed border-primary/35 bg-banner p-4">
                 <p className="flex items-center gap-2 font-hand text-xl font-bold"><Gift className="size-5" /> Your freebies</p>
-                {getsFiveChocolate && <p className="mt-1 text-sm font-semibold">✓ ₹50+ Offer: free ₹5 chocolate added to your bag.</p>}
-                {getsTenSnack && (
+                {gift > 0 && <p className="mt-1 text-sm font-semibold">✓ {best?.label}: free ₹{gift} chocolate added to your bag.</p>}
+                {freeDelivery && <p className="mt-1 text-sm font-semibold">✓ {best?.label}: free room delivery.</p>}
+                {getsFreePick && (
                   <label className="mt-3 grid gap-1 text-sm font-semibold">
-                    Pick your free ₹10 item
+                    Pick your free ₹{best?.pickValue ?? 10} item
                     <select aria-label="Free item" value={freeItem} onChange={(e) => setFreeItem(e.target.value)} className="h-10 rounded-md border border-input bg-card px-2">
                       <option value="">Choose an item…</option>
                       {freeChoices.map((item) => <option key={item.id} value={item.name}>{item.emoji} {item.name}</option>)}

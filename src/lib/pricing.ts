@@ -4,11 +4,17 @@
 import type { Coupon, CouponKind, CouponRule, DailyOffer, Delivery, Product } from "./mart-types";
 
 export const PREMIUM_PRICE = 45;
+/** The free ₹10 item of a spin coupon, and of the ₹100+ offer unless the shop sets its own limit: any item
+ * with an MRP up to ₹12. */
+export const FREE_PICK_VALUE = 10;
 export const FREE_PICK_MAX_PRICE = 12;
 /** Rupees off for each coupon kind (freeSnack100 gives a free ₹10 item instead). */
 export const COUPON_VALUES: Record<CouponKind, number> = { free60: 10, three5: 5, freeSnack100: 10, halfDelivery: 5, four10: 10, premium5: 5 };
-const FREE_PICK_SAVINGS = 1000;
-const TIER50_SAVINGS = 500;
+/** What each offer gives unless the shop set its own amounts (see DailyOffer). */
+export const OFFER_DEFAULTS = { firstPercent: 10, bulkPercent: 20, tier50Gift: 5 };
+
+/** A free chocolate as an order lists it (see gift_text in backend/app/services.py). */
+export const giftText = (rupees: number) => `₹${rupees} chocolate (free)`;
 
 /** Set by the site admin (whole rupees): added to each item's MRP (eggs: once per order), and the
  * room delivery fee. */
@@ -92,7 +98,21 @@ export function couponStatus(coupon: Coupon | null, cart: CartSummary, delivery:
 }
 
 export type DealKind = "coupon" | "bulk" | "first" | "tier100" | "tier50";
-export type Deal = { kind: DealKind; label: string; discount: number; freePick: boolean; freebies: string[] }; // discount in paise
+export type Deal = {
+  kind: DealKind;
+  label: string;
+  /** Paise off, a room delivery fee it waives included. */
+  discount: number;
+  /** She picks a free item worth ₹pickValue, with an MRP up to ₹pickUpTo. */
+  freePick: boolean;
+  pickValue: number;
+  pickUpTo: number;
+  /** A free chocolate worth ₹ (0: none); it's in freebies too. */
+  gift: number;
+  /** The room delivery fee is waived (part of discount). */
+  freeDelivery: boolean;
+  freebies: string[];
+};
 export type Quote = { subtotal: number; fee: number; discount: number; total: number; deal: Deal | null }; // all paise
 
 export type QuoteInput = {
@@ -106,32 +126,56 @@ export type QuoteInput = {
   now?: number;
 };
 
-/** Only one reward applies per order; see best_deal in backend/app/services.py. */
+/** Only one reward applies per order; the offers give the amounts the shop set on their cards. Mirrors
+ * best_deal in backend/app/services.py. */
 export function quote({ lines, delivery, firstOrder, coupon, dailyOffers, couponRule, rules = DEFAULT_RULES, now = Date.now() }: QuoteInput): Quote {
   const cart = cartSummary(lines, rules);
   const fee = delivery === "Room Delivery" ? rules.deliveryFee * 100 : 0;
   const offer = (id: DailyOffer["id"]) => dailyOffers.find((item) => item.id === id);
   const active = (id: DailyOffer["id"]) => Boolean(offer(id)?.active);
   const title = (id: DailyOffer["id"], fallback: string) => offer(id)?.title || fallback;
-  const deal = (kind: DealKind, label: string, extra: Partial<Deal> = {}): Deal => ({ kind, label, discount: 0, freePick: false, freebies: [], ...extra });
+  const deal = (kind: DealKind, label: string, extra: Partial<Deal> = {}): Deal => ({
+    kind,
+    label,
+    discount: 0,
+    freePick: false,
+    pickValue: FREE_PICK_VALUE,
+    pickUpTo: FREE_PICK_MAX_PRICE,
+    gift: 0,
+    freeDelivery: false,
+    freebies: [],
+    ...extra,
+  });
+  const gifts = (rupees: number) => (rupees ? [giftText(rupees)] : []);
 
   // [savings, deal] in priority order; ties keep the earlier one.
   const candidates: [number, Deal][] = [];
   if (active("bulk") && cart.subtotal > 20000) {
-    const amount = percentOff(cart.subtotal, 20);
-    candidates.push([amount, deal("bulk", title("bulk", "Bulk order 20% OFF"), { discount: amount })]);
+    const percent = offer("bulk")?.percent ?? OFFER_DEFAULTS.bulkPercent;
+    const off = percentOff(cart.subtotal, percent);
+    const waived = offer("bulk")?.freeDelivery ? fee : 0;
+    const gift = offer("bulk")?.gift ?? 0;
+    const bulk = deal("bulk", title("bulk", `Bulk order ${percent}% OFF`), { discount: off + waived, freeDelivery: waived > 0, gift, freebies: gifts(gift) });
+    candidates.push([off + waived + gift * 100, bulk]);
   }
   if (active("first") && firstOrder) {
-    const amount = percentOff(cart.subtotal, 10);
-    candidates.push([amount, deal("first", title("first", "First order 10% OFF"), { discount: amount })]);
+    const percent = offer("first")?.percent ?? OFFER_DEFAULTS.firstPercent;
+    const off = percentOff(cart.subtotal, percent);
+    candidates.push([off, deal("first", title("first", `First order ${percent}% OFF`), { discount: off })]);
   }
-  if (active("tier100") && cart.subtotal >= 10000) candidates.push([FREE_PICK_SAVINGS, deal("tier100", title("tier100", "₹100+ Offer"), { freePick: true })]);
-  else if (active("tier50") && cart.subtotal >= 5000) candidates.push([TIER50_SAVINGS, deal("tier50", title("tier50", "₹50+ Offer"), { freebies: ["₹5 chocolate (free)"] })]);
+  if (active("tier100") && cart.subtotal >= 10000) {
+    const upTo = offer("tier100")?.pickUpTo ?? null;
+    const [pickValue, pickUpTo] = upTo === null ? [FREE_PICK_VALUE, FREE_PICK_MAX_PRICE] : [upTo, upTo];
+    candidates.push([pickValue * 100, deal("tier100", title("tier100", "₹100+ Offer"), { freePick: true, pickValue, pickUpTo })]);
+  } else if (active("tier50") && cart.subtotal >= 5000) {
+    const gift = offer("tier50")?.gift ?? OFFER_DEFAULTS.tier50Gift;
+    candidates.push([gift * 100, deal("tier50", title("tier50", "₹50+ Offer"), { gift, freebies: gifts(gift) })]);
+  }
 
   if (coupon && couponStatus(coupon, cart, delivery, now).eligible) {
     const [savings, couponDeal] =
       coupon.kind === "freeSnack100"
-        ? [FREE_PICK_SAVINGS, deal("coupon", coupon.label, { freePick: true })]
+        ? [FREE_PICK_VALUE * 100, deal("coupon", coupon.label, { freePick: true })]
         : (() => {
             const amount = Math.min(couponValue(coupon.kind, rules.deliveryFee * 100), cart.subtotal + fee);
             return [amount, deal("coupon", coupon.label, { discount: amount })] as const;
