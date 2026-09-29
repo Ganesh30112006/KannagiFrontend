@@ -183,8 +183,9 @@ export const adminOrders = createServerFn({ method: "POST" }).handler(async () =
 export const adminSummary = createServerFn({ method: "POST" }).handler(async () => (await server()).callBackend<SalesSummary>("/admin/summary"));
 
 export const fulfillOrder = createServerFn({ method: "POST" })
-  .validator((data: unknown) => id.parse(data))
-  .handler(async ({ data }) => (await server()).callBackend<AdminOrder>(`/admin/orders/${data.id}/fulfill`, "POST"));
+  // paymentReceived: a UPI order whose payment isn't ticked yet, and the shopkeeper says the money arrived.
+  .validator((data: unknown) => id.extend({ paymentReceived: z.boolean().optional() }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<AdminOrder>(`/admin/orders/${data.id}/fulfill`, "POST", { paymentReceived: data.paymentReceived === true }));
 
 export const setPaymentReceived = createServerFn({ method: "POST" })
   .validator((data: unknown) => id.extend({ received: z.boolean() }).parse(data))

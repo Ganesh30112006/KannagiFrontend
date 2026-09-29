@@ -40,6 +40,7 @@ import { Input } from "@/components/ui/input";
 import { ManualSalePanel, SalesSummaryPanel } from "@/components/sales-panels";
 import { OrderAlertsCard } from "@/components/order-alerts-card";
 import { api, ApiError } from "@/lib/api";
+import { useNewRelease } from "@/lib/app-release";
 import { staleSince, useLiveSync, writeMark } from "@/lib/live-sync";
 import { ROLE_KEY } from "@/lib/login-role";
 import { callLink, formatMobile, isMobile, whatsappChat } from "@/lib/phone";
@@ -106,10 +107,13 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 
 const emptyProfile: CustomerProfile = { fullName: "", phone: "", block: "A", roomNumber: "" };
 
-export function ShopPage({ user, initialMode = "customer", signedOutTo = "/" }: { user: User; initialMode?: "customer" | "history" | "admin"; signedOutTo?: "/" | "/admin" }) {
+/** embedded: inside /admin's console, which shows Order alerts and watches for new releases itself. */
+export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", embedded = false }: { user: User; initialMode?: "customer" | "history" | "admin"; signedOutTo?: "/" | "/admin"; embedded?: boolean }) {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"customer" | "history" | "admin">(initialMode);
   const [adminUnlocked, setAdminUnlocked] = useState(user.isShopkeeper);
+  // The shopkeeper's page stays open for days (a Home Screen app never reloads): pick up new releases.
+  useNewRelease(adminUnlocked && !embedded);
   const [loaded, setLoaded] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<Record<number, number>>({});
@@ -343,6 +347,8 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/" }: 
   return (
     <SiteContext.Provider value={site}>
     <main className="min-h-screen bg-background pb-24 text-foreground">
+      {/* First thing on the page, so a shopkeeper sees it without scrolling. */}
+      {adminUnlocked && !embedded && <OrderAlertsCard />}
       <header className="night-sky relative overflow-hidden border-b-4 border-primary">
         {[[7, 13], [18, 42], [46, 9], [88, 13], [73, 56], [94, 67]].map(([left, top], index) => (
           <span key={`${left}-${top}`} className="twinkle absolute text-xl text-accent" style={{ left: `${left}%`, top: `${top}%`, animationDelay: `${index * 0.5}s` }}>{index % 2 ? "✦" : "★"}</span>
@@ -759,10 +765,10 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
     }
   }
 
-  async function setFulfilled(order: AdminOrder, fulfilled: boolean) {
+  async function setFulfilled(order: AdminOrder, fulfilled: boolean, paymentReceived = false) {
     setUpdatingOrder(order.id);
     try {
-      const updated = await (fulfilled ? api.admin.fulfillOrder(order.id) : api.admin.unfulfillOrder(order.id));
+      const updated = await (fulfilled ? api.admin.fulfillOrder(order.id, paymentReceived) : api.admin.unfulfillOrder(order.id));
       setOrders((current) => current.map((item) => (item.id === order.id ? updated : item)));
       if (fulfilled) toast.success(`Order ${orderLabel(order)} marked as fulfilled.`, { action: { label: "Undo", onClick: () => void setFulfilled(updated, false) } });
     } catch (error) {
@@ -820,8 +826,6 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
           </div>
         </form>
       )}
-
-      <OrderAlertsCard />
 
       <section className="mt-5 border-2 border-dashed border-primary/35 bg-card p-4 shadow-[4px_5px_0_var(--shadow-color)]">
         <h3 className="font-hand text-2xl font-bold">Store status</h3>
@@ -895,7 +899,7 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
             <label className="relative mt-2 block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" className="pl-9" placeholder="Name, mobile, room or order #" aria-label="Search orders" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} /></label>
             <div className="mt-4 space-y-3">
               {shownOrders.length === 0 && <p className="border-2 border-dashed border-border bg-card p-6 text-center text-muted-foreground">{orders.length === 0 ? "No orders yet." : orderSearch.trim() ? "No orders match your search." : orderFilter === "pending" ? "All caught up: no pending orders. 🎉" : "No orders here yet."}</p>}
-              {shownOrders.map((order) => <OrderCard key={order.id} order={order} busy={updatingOrder === order.id} setFulfilled={(fulfilled) => void setFulfilled(order, fulfilled)} setPaymentReceived={(received) => void setPaymentReceived(order, received)} />)}
+              {shownOrders.map((order) => <OrderCard key={order.id} order={order} busy={updatingOrder === order.id} setFulfilled={(fulfilled, paymentReceived) => void setFulfilled(order, fulfilled, paymentReceived)} setPaymentReceived={(received) => void setPaymentReceived(order, received)} />)}
             </div>
           </section>
         </aside>
@@ -994,7 +998,13 @@ const orderTime = (ms: number) => new Date(ms).toLocaleString("en-IN", { day: "n
 
 /** One order for the shopkeeper: who it's for (name, mobile with Call / WhatsApp, where to hand it over), then what's in it. */
 /** One order as the shopkeeper sees it; `cancel` adds the site admin's Cancel button. */
-export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cancel }: { order: AdminOrder; busy: boolean; setFulfilled: (fulfilled: boolean) => void; setPaymentReceived: (received: boolean) => void; cancel?: () => void }) {
+export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cancel }: { order: AdminOrder; busy: boolean; setFulfilled: (fulfilled: boolean, paymentReceived?: boolean) => void; setPaymentReceived: (received: boolean) => void; cancel?: () => void }) {
+  // A UPI order whose payment isn't ticked yet: handing it over says the money arrived, so ask first.
+  const handOver = () => {
+    if (!awaitingConfirmation(order)) return setFulfilled(true);
+    const reference = order.utr ? `She sent UPI reference ${order.utr}.` : "She hasn't sent a UPI reference.";
+    if (window.confirm(`Did ${money(order.total)} arrive by UPI for order ${orderLabel(order)}?\n\n${reference} Only tap OK if you can see the money in PhonePe or your bank app: this confirms the payment and marks the order as fulfilled.`)) setFulfilled(true, true);
+  };
   const { name, phone, email, block, room } = order.customer;
   const hostelRoom = block && room ? `Block ${block}, Room ${room}` : room ? `Room ${room}` : null;
   const call = phone ? callLink(phone) : undefined;
@@ -1032,9 +1042,7 @@ export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cance
       {order.onRequest && <span className="mt-2 inline-block rounded-full bg-accent px-2 py-1 text-[11px] font-bold text-accent-foreground">On request (store was offline)</span>}
       {order.cancelled ? null : order.fulfilled ? (
         <div className="mt-3 flex items-center justify-between gap-2"><span className="inline-flex items-center gap-1 text-sm font-bold text-stock-foreground"><Check className="size-4" /> Fulfilled</span><Button size="sm" variant="ghost" disabled={busy} onClick={() => setFulfilled(false)}>Undo</Button></div>
-      ) : awaitingConfirmation(order) ? (
-        <><Button className="mt-3 w-full" disabled>Mark as Fulfilled</Button><p className="mt-1 text-center text-xs text-muted-foreground">Confirm the payment first (Payment received).</p></>
-      ) : <Button className="mt-3 w-full" disabled={busy} onClick={() => setFulfilled(true)}>{busy ? "Saving…" : "Mark as Fulfilled"}</Button>}
+      ) : <Button className="mt-3 w-full" disabled={busy} onClick={handOver}>{busy ? "Saving…" : "Mark as Fulfilled"}</Button>}
       {cancel && !order.cancelled && !order.fulfilled && <Button variant="outline" className="mt-2 w-full border-destructive/60 text-destructive" disabled={busy} onClick={cancel}><X /> Cancel order</Button>}
     </article>
   );

@@ -77,7 +77,8 @@ export const api = {
   admin: {
     orders: () => unwrap(fn.adminOrders()),
     summary: () => unwrap(fn.adminSummary()),
-    fulfillOrder: (id: number) => change(() => fn.fulfillOrder({ data: { id } })),
+    /** paymentReceived: also confirms an unticked UPI payment (the shopkeeper says the money arrived). */
+    fulfillOrder: (id: number, paymentReceived = false) => change(() => fn.fulfillOrder({ data: { id, paymentReceived } })),
     unfulfillOrder: (id: number) => change(() => fn.unfulfillOrder({ data: { id } })),
     setPaymentReceived: (id: number, received: boolean) => change(() => fn.setPaymentReceived({ data: { id, received } })),
     createProduct: (product: { name: string; mrp: number; stock: number; image?: string }) => change(() => fn.createProduct({ data: product })),

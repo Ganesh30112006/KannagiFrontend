@@ -32,12 +32,13 @@ import {
 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 
+import { OrderAlertsCard } from "@/components/order-alerts-card";
 import { OrderCard, ShopPage } from "@/components/shop-page";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { adminApi, ORDER_PAGE } from "@/lib/admin-api";
 import { api, SIGNED_OUT } from "@/lib/api";
-import { alertsState } from "@/lib/order-alerts";
+import { useNewRelease } from "@/lib/app-release";
 import { staleSince, useLiveSync, writeMark } from "@/lib/live-sync";
 import type {
   AdminOrder,
@@ -184,11 +185,8 @@ export function AdminConsole({ user }: { user: User }) {
     return () => window.removeEventListener(SIGNED_OUT, backToSignIn);
   }, [router]);
 
-  // Order alerts on this device follow the admin's sign-in, which lasts 12 hours: signing in again here
-  // keeps them going, without opening the shop dashboard.
-  useEffect(() => {
-    void alertsState().catch(() => undefined);
-  }, []);
+  // The console stays open for hours: pick up a new release instead of running the old one.
+  useNewRelease();
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -227,10 +225,12 @@ export function AdminConsole({ user }: { user: User }) {
           ))}
         </nav>
       </header>
+      {/* On every tab. It also keeps this device's alerts on the admin's current (12-hour) sign-in. */}
+      <OrderAlertsCard />
       {tab === "shop" ? (
         // The full shop and shopkeeper dashboard: products, stock, offers, spin wheel, store status,
         // orders and sales, plus the customer view. It brings its own notifications.
-        <ShopPage user={user} initialMode="admin" signedOutTo="/admin" />
+        <ShopPage user={user} initialMode="admin" signedOutTo="/admin" embedded />
       ) : (
         <main className="mx-auto max-w-6xl px-4 py-6 pb-16">
           {tab === "overview" && <OverviewTab open={open} />}
@@ -1520,9 +1520,11 @@ function OrdersTab({
             key={order.id}
             order={order}
             busy={busy === order.id}
-            setFulfilled={(fulfilled) =>
+            setFulfilled={(fulfilled, paymentReceived) =>
               void act(order, () =>
-                fulfilled ? api.admin.fulfillOrder(order.id) : api.admin.unfulfillOrder(order.id),
+                fulfilled
+                  ? api.admin.fulfillOrder(order.id, paymentReceived)
+                  : api.admin.unfulfillOrder(order.id),
               )
             }
             setPaymentReceived={(received) =>
