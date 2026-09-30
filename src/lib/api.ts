@@ -80,6 +80,8 @@ export const api = {
     /** paymentReceived: also confirms an unticked UPI payment (the shopkeeper says the money arrived). */
     fulfillOrder: (id: number, paymentReceived = false) => change(() => fn.fulfillOrder({ data: { id, paymentReceived } })),
     unfulfillOrder: (id: number) => change(() => fn.unfulfillOrder({ data: { id } })),
+    /** Admins only (the API checks). */
+    removeWish: (name: string) => change(() => fn.removeWish({ data: { name } })),
     setPaymentReceived: (id: number, received: boolean) => change(() => fn.setPaymentReceived({ data: { id, received } })),
     createProduct: (product: { name: string; mrp: number; stock: number; image?: string }) => change(() => fn.createProduct({ data: product })),
     updateProduct: (id: number, changes: { stock?: number; stockDelta?: number; threshold?: number; mrp?: number; image?: string | null }) =>

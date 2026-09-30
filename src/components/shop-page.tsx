@@ -326,6 +326,18 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
     }
   }
 
+  /** Admins only (the API checks): takes an item's line off the wishlist, every customer's request for it. */
+  async function removeWish(name: string) {
+    if (!window.confirm(`Remove "${name}" from the wishlist requests? Every customer's request for it goes.`)) return;
+    try {
+      await api.admin.removeWish(name);
+      setWishes((current) => current.filter((wish) => wish.name !== name));
+      toast.success(`"${name}" removed from the requests.`);
+    } catch (error) {
+      toast.error(errorText(error, "Could not remove the request."));
+    }
+  }
+
   function finishSpin(result: SpinResult) {
     setSpun(true);
     setCoupon(result.coupon ?? null);
@@ -397,7 +409,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       {mode === "customer" ? (
         <CustomerView loaded={loaded} products={products} cart={cart} updateCart={updateCart} wishes={wishes} wishInput={wishInput} setWishInput={setWishInput} submitWish={submitWish} wishMessage={wishMessage} coupon={coupon} firstOrder={loaded && firstOrder} launchMessage={launchMessage} dailyOffers={dailyOffers} />
       ) : mode === "history" ? <OrderHistory orders={orders} onOpen={setReceipt} onPay={setPaying} onEditProfile={() => setProfileOpen(true)} /> : adminUnlocked ? (
-        <AdminView products={products} setProducts={setProducts} wishes={wishes} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={() => { promotionsDirty.current = false; }} />
+        <AdminView products={products} setProducts={setProducts} wishes={wishes} {...(user.isAdmin ? { removeWish } : {})} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={() => { promotionsDirty.current = false; }} />
       ) : (
         <section className="mx-auto grid max-w-md gap-3 px-4 py-16 text-center">
           <h2 className="font-hand text-3xl font-bold">Shopkeeper dashboard</h2>
@@ -467,6 +479,8 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
   const hours = Math.floor(remaining / 3_600_000);
   const minutes = Math.floor((remaining % 3_600_000) / 60_000);
   const seconds = Math.floor((remaining % 60_000) / 1000);
+  // Only what she can buy (the API sends customers nothing else; staff previewing this see the same).
+  const shelf = products.filter((product) => product.stock > 0);
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <section className="mb-8" aria-labelledby="offers-title">
@@ -491,26 +505,25 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
         <div><p className="font-hand text-lg font-bold text-primary">Pick your midnight fix</p><h2 className="font-hand text-4xl font-bold">Snack shelf</h2></div>
         <span className="hidden rounded-full bg-secondary px-3 py-1 text-sm font-bold text-secondary-foreground sm:block">MRP + ₹{site.markup} · eggs charged once per bundle</span>
       </div>
-      {products.length === 0 && <p className="border-2 border-dashed border-border bg-card p-8 text-center text-muted-foreground">{loaded ? "The shelf is empty right now — check back soon!" : "Loading snacks…"}</p>}
+      {shelf.length === 0 && <p className="border-2 border-dashed border-border bg-card p-8 text-center text-muted-foreground">{!loaded ? "Loading snacks…" : products.length ? "Everything's sold out right now — check back soon!" : "The shelf is empty right now — check back soon!"}</p>}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-        {products.map((product, index) => {
+        {shelf.map((product, index) => {
           const qty = cart[product.id] ?? 0;
-          const soldOut = product.stock === 0;
-          const low = product.stock > 0 && product.stock <= product.threshold;
+          const low = product.stock <= product.threshold;
           return (
             <article key={product.id} className={`product-card relative min-w-0 border-2 border-foreground/10 bg-card p-3 shadow-[3px_4px_0_var(--shadow-color)] ${index % 3 === 1 ? "rotate-[.6deg]" : index % 3 === 2 ? "-rotate-[.5deg]" : ""}`}>
               <div className="grid aspect-square place-items-center overflow-hidden rounded-sm bg-product text-6xl sm:text-7xl">
                 {product.image ? <img src={product.image} alt={product.name} className="h-full w-full object-cover" loading="lazy" decoding="async" /> : <span aria-hidden="true">{product.emoji}</span>}
               </div>
-              <span className={`absolute right-1 top-1 rounded-full px-2 py-1 text-[10px] font-bold ${soldOut ? "bg-foreground text-background" : low ? "bg-accent text-accent-foreground" : "bg-stock text-stock-foreground"}`}>
-                {soldOut ? "Out of Stock" : low ? `Only ${product.stock} left!` : "In Stock"}
+              <span className={`absolute right-1 top-1 rounded-full px-2 py-1 text-[10px] font-bold ${low ? "bg-accent text-accent-foreground" : "bg-stock text-stock-foreground"}`}>
+                {low ? `Only ${product.stock} left!` : "In Stock"}
               </span>
               <h3 className="mt-3 min-h-12 font-hand text-xl font-bold leading-tight">{product.name}</h3>
               <div className="flex items-end justify-between gap-2"><div className="min-w-0 [overflow-wrap:anywhere]">{isEggProduct(product) ? <><p className="text-lg font-bold text-primary">{money(product.mrp)} / egg</p><p className="text-[11px] text-muted-foreground">Quantity total + ₹{site.markup} once</p></> : <><p className="text-lg font-bold text-primary">{money(product.mrp + site.markup)}</p><p className="text-[11px] text-muted-foreground">MRP {money(product.mrp)} + ₹{site.markup}</p></>}</div></div>
               <div className="mt-3 grid grid-cols-[2rem_1fr_2rem] items-center rounded-md border border-border bg-background p-1">
                 <Button size="icon" variant="ghost" aria-label={`Remove ${product.name}`} onClick={() => updateCart(product.id, -1)} disabled={!qty}><Minus /></Button>
                 <span className="text-center font-bold">{qty}</span>
-                <Button size="icon" aria-label={`Add ${product.name}`} onClick={() => updateCart(product.id, 1)} disabled={soldOut || qty >= product.stock}><Plus /></Button>
+                <Button size="icon" aria-label={`Add ${product.name}`} onClick={() => updateCart(product.id, 1)} disabled={qty >= product.stock}><Plus /></Button>
               </div>
             </article>
           );
@@ -623,7 +636,7 @@ function SpinWheel({ prizes, spun, coupon, onResult, onClose }: { prizes: WheelP
   );
 }
 
-function AdminView({ products, setProducts, wishes, orders, setOrders, override, setOverride, storeOnline, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, summary, manualSales, setManualSales, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; summary: SalesSummary | null; manualSales: ManualSale[]; setManualSales: React.Dispatch<React.SetStateAction<ManualSale[]>>; promotionsSaved: () => void }) {
+function AdminView({ products, setProducts, wishes, removeWish, orders, setOrders, override, setOverride, storeOnline, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, summary, manualSales, setManualSales, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; removeWish?: (name: string) => void; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; summary: SalesSummary | null; manualSales: ManualSale[]; setManualSales: React.Dispatch<React.SetStateAction<ManualSale[]>>; promotionsSaved: () => void }) {
   const site = useSite();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -888,7 +901,7 @@ function AdminView({ products, setProducts, wishes, orders, setOrders, override,
           </div>
         </section>
         <aside className="space-y-7">
-          <section className="border-2 border-dashed border-primary/35 bg-accent p-5"><h3 className="font-hand text-2xl font-bold">Customer Wishlist Requests</h3><div className="mt-4 space-y-3">{wishes.length === 0 && <p className="text-sm">No requests yet.</p>}{wishes.map(({ name, count }, index) => <div key={name} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-foreground/10 pb-2"><span className="grid size-7 place-items-center rounded-full bg-primary font-bold text-primary-foreground">{index+1}</span><span className="font-bold [overflow-wrap:anywhere]">{name}</span><span className="text-sm">{plural(count, "Request")}</span></div>)}</div></section>
+          <section className="border-2 border-dashed border-primary/35 bg-accent p-5"><h3 className="font-hand text-2xl font-bold">Customer Wishlist Requests</h3><p className="mt-1 text-xs">A request goes away by itself when you add that item (same name) with stock.{removeWish ? " Tap × to remove one." : ""}</p><div className="mt-4 space-y-3">{wishes.length === 0 && <p className="text-sm">No requests yet.</p>}{wishes.map(({ name, count }, index) => <div key={name} className={`grid ${removeWish ? "grid-cols-[auto_minmax(0,1fr)_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto]"} items-center gap-3 border-b border-foreground/10 pb-2`}><span className="grid size-7 place-items-center rounded-full bg-primary font-bold text-primary-foreground">{index+1}</span><span className="font-bold [overflow-wrap:anywhere]">{name}</span><span className="text-sm">{plural(count, "Request")}</span>{removeWish && <Button size="icon" variant="ghost" className="size-8" aria-label={`Remove request: ${name}`} onClick={() => removeWish(name)}><X /></Button>}</div>)}</div></section>
           <section>
             <h3 className="font-hand text-3xl font-bold">Incoming Orders</h3>{summary && summary.orderCount > orders.length && <p className="text-xs text-muted-foreground">Showing the latest {orders.length} of {summary.orderCount} orders.</p>}
             <div role="group" aria-label="Show orders" className="mt-3 grid grid-cols-3 gap-1 rounded-md border border-border bg-card p-1">

@@ -195,6 +195,11 @@ export const unfulfillOrder = createServerFn({ method: "POST" })
   .validator((data: unknown) => id.parse(data))
   .handler(async ({ data }) => (await server()).callBackend<AdminOrder>(`/admin/orders/${data.id}/unfulfill`, "POST"));
 
+// Admins only (the API refuses anyone else): a line of the Customer Wishlist Requests, every customer's request for it.
+export const removeWish = createServerFn({ method: "POST" })
+  .validator((data: unknown) => z.object({ name: text(60) }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<null>("/site-admin/wishes/remove", "POST", { name: data.name }));
+
 export const createProduct = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ name: text(80), mrp: z.number().positive().max(100_000), stock: z.number().int().min(0).max(100_000), image: image.optional() }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<Product>("/admin/products", "POST", data));
