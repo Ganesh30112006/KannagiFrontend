@@ -11,7 +11,8 @@ export const FREE_PICK_MAX_PRICE = 12;
 /** Rupees off for each coupon kind (freeSnack100 gives a free ₹10 item instead). */
 export const COUPON_VALUES: Record<CouponKind, number> = { free60: 10, three5: 5, freeSnack100: 10, halfDelivery: 5, four10: 10, premium5: 5 };
 /** What each offer gives unless the shop set its own amounts (see DailyOffer). */
-export const OFFER_DEFAULTS = { firstPercent: 10, bulkPercent: 20, tier50Gift: 5 };
+// loyalty: every 10th completed order, a free item up to ₹10 (it stacks, so quote() doesn't price it).
+export const OFFER_DEFAULTS = { firstPercent: 10, bulkPercent: 20, tier50Gift: 5, loyaltyEvery: 10, loyaltyPickUpTo: 10 };
 
 /** A free chocolate as an order lists it (see gift_text in backend/app/services.py). */
 export const giftText = (rupees: number) => `₹${rupees} chocolate (free)`;

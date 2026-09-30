@@ -226,7 +226,7 @@ export function AdminConsole({ user }: { user: User }) {
         </nav>
       </header>
       {/* On every tab. It also keeps this device's alerts on the admin's current (12-hour) sign-in. */}
-      <OrderAlertsCard />
+      <OrderAlertsCard admin />
       {tab === "shop" ? (
         // The full shop and shopkeeper dashboard: products, stock, offers, spin wheel, store status,
         // orders and sales, plus the customer view. It brings its own notifications.

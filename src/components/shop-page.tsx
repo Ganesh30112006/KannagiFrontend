@@ -5,9 +5,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
+  Bell,
   Camera,
   Check,
   ChevronDown,
+  ClipboardCopy,
   Gift,
   Heart,
   Hourglass,
@@ -22,8 +24,10 @@ import {
   Phone,
   Plus,
   Receipt,
+  RotateCcw,
   Search,
   ShoppingBag,
+  ShoppingCart,
   Sparkles,
   Store,
   TrendingUp,
@@ -38,7 +42,7 @@ import weekendMovieGirls from "@/assets/weekend-movie-girls.webp";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ManualSalePanel, SalesSummaryPanel } from "@/components/sales-panels";
-import { OrderAlertsCard } from "@/components/order-alerts-card";
+import { NotificationsCard, OrderAlertsCard } from "@/components/order-alerts-card";
 import { api, ApiError } from "@/lib/api";
 import { useNewRelease } from "@/lib/app-release";
 import { staleSince, useLiveSync, writeMark } from "@/lib/live-sync";
@@ -57,6 +61,7 @@ import type {
   DailyOffer,
   Delivery,
   KnownRevs,
+  Loyalty,
   ManualSale,
   Order,
   Payment,
@@ -99,6 +104,9 @@ const defaultWheelPrizes: WheelPrize[] = [
 ];
 
 const orderLabel = (order: Order) => `#${String(order.orderNumber).padStart(4, "0")}`;
+/** Shelf sections the shopkeeper picks from (any other a product already has is kept). */
+const CATEGORIES = ["Snacks", "Chips", "Chocolates", "Biscuits", "Noodles", "Drinks", "Sweets", "Essentials"];
+const categoryOptions = (current?: string) => (current && !CATEGORIES.includes(current) ? [...CATEGORIES, current] : CATEGORIES);
 const errorText = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -154,6 +162,8 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   const payingRef = useRef<Order | null>(null);
   payingRef.current = paying;
   const [justPlacedId, setJustPlacedId] = useState<number | null>(null);
+  // Her loyalty card (stamps and rewards), from the server.
+  const [loyalty, setLoyalty] = useState<Loyalty | null>(null);
 
   const applyPromotions = useCallback((promotions: Promotions) => {
     promotionsDirty.current = false;
@@ -181,6 +191,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       setWishes(data.wishes);
       setSpun(data.spin.spunToday);
       setCoupon(data.spin.coupon ?? null);
+      setLoyalty(data.loyalty ?? null);
       setLoaded(true);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) void navigate({ to: signedOutTo, replace: true });
@@ -212,6 +223,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
     setCoupon(data.spin.coupon ?? null);
     if (data.products) setProducts(data.products);
     if (data.wishes) setWishes(data.wishes);
+    if (data.loyalty) setLoyalty(data.loyalty);
     if (data.promotions) {
       if (!promotionsDirty.current) applyPromotions(data.promotions);
       else toast.info("Offers were changed on another device. Saving here will replace them.", { id: "offers-changed", duration: 8000 });
@@ -314,7 +326,9 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       const result = await api.addWish(item);
       const others = result.count - 1;
       setWishMessage(
-        result.alreadyRequested
+        result.onShelf
+          ? `Good news: ${result.name} is on the shelf right now! 🎉`
+          : result.alreadyRequested
           ? `You already asked for ${result.name} — ${plural(result.count, "request")} so far 💖`
           : others > 0
             ? `${others} other ${others === 1 ? "girl also wants" : "girls also want"} this 💖`
@@ -336,6 +350,26 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
     } catch (error) {
       toast.error(errorText(error, "Could not remove the request."));
     }
+  }
+
+  /** A past order's items back in the cart (as many as are on the shelf), then the cart opens. */
+  function orderAgain(order: Order) {
+    const onShelf = new Map(products.filter((product) => product.stock > 0).map((product) => [product.name, product]));
+    const next = { ...cart };
+    const added: string[] = [];
+    const gone: string[] = [];
+    for (const item of order.items) {
+      const product = onShelf.get(item.name);
+      const have = product ? next[product.id] ?? 0 : 0;
+      if (!product || have >= product.stock) { gone.push(item.name); continue; }
+      next[product.id] = Math.min(product.stock, have + item.qty);
+      added.push(item.name);
+    }
+    if (!added.length) { toast.error(`None of order ${orderLabel(order)}'s items are on the shelf right now.`); return; }
+    setCart(next);
+    setMode("customer");
+    setCartOpen(true);
+    if (gone.length) toast.info(`Not on the shelf right now: ${gone.join(", ")}.`, { duration: 6000 });
   }
 
   function finishSpin(result: SpinResult) {
@@ -407,8 +441,8 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       </nav>
 
       {mode === "customer" ? (
-        <CustomerView loaded={loaded} products={products} cart={cart} updateCart={updateCart} wishes={wishes} wishInput={wishInput} setWishInput={setWishInput} submitWish={submitWish} wishMessage={wishMessage} coupon={coupon} firstOrder={loaded && firstOrder} launchMessage={launchMessage} dailyOffers={dailyOffers} />
-      ) : mode === "history" ? <OrderHistory orders={orders} onOpen={setReceipt} onPay={setPaying} onEditProfile={() => setProfileOpen(true)} /> : adminUnlocked ? (
+        <CustomerView loaded={loaded} products={products} cart={cart} updateCart={updateCart} wishes={wishes} wishInput={wishInput} setWishInput={setWishInput} submitWish={submitWish} wishMessage={wishMessage} coupon={coupon} firstOrder={loaded && firstOrder} launchMessage={launchMessage} dailyOffers={dailyOffers} loyalty={loyalty} />
+      ) : mode === "history" ? <OrderHistory orders={orders} onOpen={setReceipt} onPay={setPaying} onEditProfile={() => setProfileOpen(true)} onOrderAgain={orderAgain} loyalty={loyalty} /> : adminUnlocked ? (
         <AdminView products={products} setProducts={setProducts} wishes={wishes} {...(user.isAdmin ? { removeWish } : {})} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={() => { promotionsDirty.current = false; }} />
       ) : (
         <section className="mx-auto grid max-w-md gap-3 px-4 py-16 text-center">
@@ -441,6 +475,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
           dailyOffers={dailyOffers}
           couponRule={couponRule}
           storeOnline={storeOnline}
+          loyalty={loyalty}
           onClose={() => setCartOpen(false)}
           profile={profile}
           onComplete={async (input) => {
@@ -467,8 +502,10 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   );
 }
 
-function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, setWishInput, submitWish, wishMessage, coupon, firstOrder, launchMessage, dailyOffers }: { loaded: boolean; products: Product[]; cart: Record<number, number>; updateCart: (id: number, delta: number) => void; wishes: Wish[]; wishInput: string; setWishInput: (value: string) => void; submitWish: (event: FormEvent<HTMLFormElement>) => void; wishMessage: string; coupon: Coupon | null; firstOrder: boolean; launchMessage: string; dailyOffers: DailyOffer[] }) {
+function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, setWishInput, submitWish, wishMessage, coupon, firstOrder, launchMessage, dailyOffers, loyalty }: { loaded: boolean; products: Product[]; cart: Record<number, number>; updateCart: (id: number, delta: number) => void; wishes: Wish[]; wishInput: string; setWishInput: (value: string) => void; submitWish: (event: FormEvent<HTMLFormElement>) => void; wishMessage: string; coupon: Coupon | null; firstOrder: boolean; launchMessage: string; dailyOffers: DailyOffer[]; loyalty: Loyalty | null }) {
   const site = useSite();
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("All");
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!coupon) return;
@@ -481,6 +518,11 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
   const seconds = Math.floor((remaining % 60_000) / 1000);
   // Only what she can buy (the API sends customers nothing else; staff previewing this see the same).
   const shelf = products.filter((product) => product.stock > 0);
+  // Sections (only when the shelf has more than one) and a search box.
+  const categories = [...new Set(shelf.map((product) => product.category))].sort((a, b) => a.localeCompare(b));
+  const section = categories.includes(category) ? category : "All";
+  const query = search.trim().toLowerCase();
+  const shown = shelf.filter((product) => (section === "All" || product.category === section) && (!query || product.name.toLowerCase().includes(query)));
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <section className="mb-8" aria-labelledby="offers-title">
@@ -495,6 +537,7 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
               <span aria-hidden="true" className="absolute right-2 top-1 text-xl opacity-50">{offer.icon}</span>
               <h3 className="font-hand text-2xl font-bold">{offer.id === "first" && !firstOrder ? "First order discount" : offer.title}</h3>
               <p className="mt-1 text-sm font-semibold text-foreground/75">{offer.id === "first" && !firstOrder ? "Already used on your first order." : offer.note}</p>
+              {offer.id === "loyalty" && loyalty?.active && <p className="mt-2 text-xs font-bold">{loyalty.rewards > 0 ? `🎁 Your reward is ready: pick it at checkout!` : `Your card: ${loyalty.stamps} of ${loyalty.every} stamps`}</p>}
             </article>
           ))}
         </div>
@@ -505,9 +548,20 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
         <div><p className="font-hand text-lg font-bold text-primary">Pick your midnight fix</p><h2 className="font-hand text-4xl font-bold">Snack shelf</h2></div>
         <span className="hidden rounded-full bg-secondary px-3 py-1 text-sm font-bold text-secondary-foreground sm:block">MRP + ₹{site.markup} · eggs charged once per bundle</span>
       </div>
+      {shelf.length > 0 && (
+        <div className="mb-4 grid gap-2">
+          <label className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" className="h-11 bg-card pl-9" placeholder="Search snacks" aria-label="Search snacks" maxLength={60} value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+          {categories.length > 1 && (
+            <div role="group" aria-label="Shelf sections" className="flex gap-2 overflow-x-auto pb-1">
+              {["All", ...categories].map((name) => <Button key={name} size="sm" variant={section === name ? "default" : "outline"} aria-pressed={section === name} className="shrink-0 rounded-full" onClick={() => setCategory(name)}>{name}</Button>)}
+            </div>
+          )}
+        </div>
+      )}
       {shelf.length === 0 && <p className="border-2 border-dashed border-border bg-card p-8 text-center text-muted-foreground">{!loaded ? "Loading snacks…" : products.length ? "Everything's sold out right now — check back soon!" : "The shelf is empty right now — check back soon!"}</p>}
+      {shelf.length > 0 && shown.length === 0 && <p className="border-2 border-dashed border-border bg-card p-6 text-center text-muted-foreground">{query ? <>Nothing called &ldquo;{search.trim()}&rdquo; on the shelf right now. Ask for it below 👇</> : "Nothing in this section right now."}</p>}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-        {shelf.map((product, index) => {
+        {shown.map((product, index) => {
           const qty = cart[product.id] ?? 0;
           const low = product.stock <= product.threshold;
           return (
@@ -518,6 +572,7 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
               <span className={`absolute right-1 top-1 rounded-full px-2 py-1 text-[10px] font-bold ${low ? "bg-accent text-accent-foreground" : "bg-stock text-stock-foreground"}`}>
                 {low ? `Only ${product.stock} left!` : "In Stock"}
               </span>
+              {(product.popular || product.isNew) && <span className="absolute left-1 top-1 rounded-full bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground shadow-sm">{product.popular ? "🔥 Popular" : "✨ New"}</span>}
               <h3 className="mt-3 min-h-12 font-hand text-xl font-bold leading-tight">{product.name}</h3>
               <div className="flex items-end justify-between gap-2"><div className="min-w-0 [overflow-wrap:anywhere]">{isEggProduct(product) ? <><p className="text-lg font-bold text-primary">{money(product.mrp)} / egg</p><p className="text-[11px] text-muted-foreground">Quantity total + ₹{site.markup} once</p></> : <><p className="text-lg font-bold text-primary">{money(product.mrp + site.markup)}</p><p className="text-[11px] text-muted-foreground">MRP {money(product.mrp)} + ₹{site.markup}</p></>}</div></div>
               <div className="mt-3 grid grid-cols-[2rem_1fr_2rem] items-center rounded-md border border-border bg-background p-1">
@@ -558,6 +613,7 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
           <Button type="submit" className="h-11">Submit Request</Button>
         </form>
         {wishMessage && <p className="mt-3 font-hand text-lg font-bold text-primary">{wishMessage}</p>}
+        <NotificationsCard compact />
         <div className="mt-4 flex flex-wrap gap-2">{wishes.slice(0, 3).map(({ name, count }) => <span key={name} className="rounded-full bg-card px-3 py-1 text-xs font-bold text-foreground">{name} · {plural(count, "request")}</span>)}</div>
       </section>
     </div>
@@ -643,11 +699,13 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
   const [newStock, setNewStock] = useState("5");
   const [newPrice, setNewPrice] = useState("20");
   const [newImage, setNewImage] = useState<string | undefined>();
+  const [newCategory, setNewCategory] = useState("Snacks");
   const addFormRef = useRef<HTMLFormElement>(null);
   const [savingPromotions, setSavingPromotions] = useState(false);
   // The dashboard's pages: shop management, entering an in-person sale, and the sales figures.
   const [page, setPage] = useState<DashboardPage>("dashboard");
   const lowStock = products.filter((item) => item.stock <= item.threshold);
+  const outOfStock = lowStock.filter((item) => item.stock === 0).length;
   const analytics = useMemo(() => {
     const sold = new Map((summary?.sold ?? []).map((item) => [item.name, item.qty] as const));
     const performance = products.map((product) => ({ name: product.name, sold: sold.get(product.name) ?? 0, stock: product.stock, mrp: product.mrp }));
@@ -667,7 +725,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
   const productQueues = useRef(new Map<number, Promise<void>>());
   // Stock/threshold taps still waiting for the server, per product.
   const pendingTaps = useRef(new Map<number, number>());
-  function updateProduct(id: number, changes: { stock?: number; stockDelta?: number; threshold?: number; mrp?: number; image?: string | null }) {
+  function updateProduct(id: number, changes: { stock?: number; stockDelta?: number; threshold?: number; mrp?: number; category?: string; image?: string | null }) {
     const run = async () => {
       try {
         const updated = await api.admin.updateProduct(id, changes);
@@ -708,11 +766,22 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
     if (mrp !== item.mrp) void updateProduct(item.id, { mrp });
   }
 
-  function openAddForm() {
+  function openAddForm(name?: string) {
     setPage("dashboard");
     setAdding(true);
+    if (name !== undefined) setNewName(name);
     // The form sits at the top of the dashboard; bring it into view from the inventory button too.
     window.setTimeout(() => addFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
+
+  /** From the Restock page to that item's card in Inventory Management. */
+  function openInventoryCard(id: number) {
+    setPage("dashboard");
+    window.setTimeout(() => {
+      const card = document.getElementById(`inventory-${id}`);
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      card?.querySelector<HTMLInputElement>('input[aria-label="Current stock"]')?.focus({ preventScroll: true });
+    }, 50);
   }
 
   async function addProduct(event: FormEvent<HTMLFormElement>) {
@@ -724,9 +793,9 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
     if (mrp === null) { toast.error("Enter a purchase price above ₹0."); return; }
     if (!Number.isInteger(stock) || stock < 0) { toast.error("Starting stock must be a whole number (0 or more)."); return; }
     try {
-      const created = await api.admin.createProduct({ name: newName.trim(), mrp, stock, ...(image ? { image } : {}) });
+      const created = await api.admin.createProduct({ name: newName.trim(), mrp, stock, category: newCategory, ...(image ? { image } : {}) });
       setProducts((current) => [...current, created]);
-      setNewName(""); setNewStock("5"); setNewPrice("20"); setNewImage(undefined); setAdding(false);
+      setNewName(""); setNewStock("5"); setNewPrice("20"); setNewImage(undefined); setNewCategory("Snacks"); setAdding(false);
       toast.success(`${created.name} added to the shop.`);
     } catch (error) {
       toast.error(errorText(error, "Could not add the product."));
@@ -813,13 +882,15 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
         <Button className="justify-self-start sm:justify-self-auto" onClick={() => (adding && page === "dashboard" ? setAdding(false) : openAddForm())}><PackagePlus /> {adding && page === "dashboard" ? "Close" : "Add item"}</Button>
       </div>
 
-      <div role="tablist" aria-label="Dashboard pages" className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-1 rounded-md border border-border bg-card p-1">
+      <div role="tablist" aria-label="Dashboard pages" className="mt-4 grid grid-cols-4 gap-1 rounded-md border border-border bg-card p-1">
         {DASHBOARD_PAGES.map(({ id, label, icon: Icon }) => (
           <Button key={id} role="tab" aria-selected={page === id} variant={page === id ? "default" : "ghost"} className="h-auto min-h-10 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => setPage(id)}>
-            <Icon /> {label}
+            <Icon /> {label}{id === "restock" && lowStock.length > 0 && <span className="rounded-full bg-alert px-1.5 text-[0.7rem] font-bold leading-5 text-alert-foreground">{lowStock.length}</span>}
           </Button>
         ))}
       </div>
+
+      {page === "restock" && <RestockPanel products={products} sold={summary?.sold ?? []} wishes={wishes} onEdit={openInventoryCard} />}
 
       {page === "manual" && <ManualSalePanel products={products} sales={manualSales} onRecorded={manualSaleRecorded} onUndone={(sale) => setManualSales((current) => current.map((item) => (item.id === sale.id ? sale : item)))} />}
 
@@ -834,6 +905,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
               <label className="grid gap-1 text-xs font-bold">MRP (₹)<Input required type="number" inputMode="decimal" min="0.01" max="100000" step="0.01" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} aria-label="Purchase price" /></label>
               <label className="grid gap-1 text-xs font-bold">Starting stock<Input required type="number" inputMode="numeric" min="0" max="100000" step="1" value={newStock} onChange={(e) => setNewStock(e.target.value)} aria-label="Starting stock" /></label>
             </div>
+            <label className="grid gap-1 text-xs font-bold">Shelf section<select aria-label="New item's shelf section" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm font-normal">{categoryOptions(newCategory).map((name) => <option key={name}>{name}</option>)}</select></label>
             <p className="text-xs text-muted-foreground">Customers pay MRP + ₹{site.markup}. Add a real photo so customers recognise the item; you can also add or change it later.</p>
             <Button type="submit" className="h-11"><PackagePlus /> Add item</Button>
           </div>
@@ -876,18 +948,21 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
 
 
 
-      <section className="mt-6 bg-alert p-5 text-alert-foreground shadow-[5px_6px_0_var(--shadow-color)]">
-        <div className="flex items-center gap-2"><AlertTriangle className="size-6" /><h3 className="font-hand text-2xl font-bold">Restock Needed! 🚨</h3></div>
-        <div className="mt-3 flex flex-wrap gap-2">{lowStock.length === 0 && <span className="text-sm font-bold">Everything is stocked up ✨</span>}{lowStock.map((item) => <span key={item.id} className="rounded-full bg-card px-3 py-1 text-sm font-bold text-foreground">Restock Alert: {item.name} ({item.stock} remaining)</span>)}</div>
-      </section>
+      {lowStock.length > 0 && (
+        <button type="button" onClick={() => setPage("restock")} className="mt-6 flex w-full items-center gap-2 rounded-md bg-alert px-4 py-3 text-left text-alert-foreground shadow-[4px_5px_0_var(--shadow-color)]">
+          <AlertTriangle className="size-5 shrink-0" />
+          <span className="min-w-0 flex-1 text-sm font-bold">{plural(lowStock.length, "item")} to restock{outOfStock ? ` (${outOfStock} out of stock)` : ""} 🚨</span>
+          <span className="shrink-0 text-sm font-bold underline">See by section</span>
+        </button>
+      )}
 
       <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,.65fr)]">
         <section>
-          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-hand text-3xl font-bold">Inventory Management</h3><Button variant="secondary" onClick={openAddForm}><PackagePlus /> Add item</Button></div>
+          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-hand text-3xl font-bold">Inventory Management</h3><Button variant="secondary" onClick={() => openAddForm()}><PackagePlus /> Add item</Button></div>
           <p className="mt-1 text-xs text-muted-foreground">Stock you add (a new item&apos;s starting stock, + or a typed number) is recorded as new stock bought, and stock you take off as taken off. A mistake put right within 10 minutes isn&apos;t counted.</p>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {products.map((item) => (
-              <article key={item.id} className="min-w-0 border-2 border-foreground/10 bg-card p-4 shadow-[3px_4px_0_var(--shadow-color)]">
+              <article key={item.id} id={`inventory-${item.id}`} className="min-w-0 scroll-mt-24 border-2 border-foreground/10 bg-card p-4 shadow-[3px_4px_0_var(--shadow-color)]">
                 <PhotoPicker label={item.name} emoji={item.emoji} image={item.image} onPick={(image) => updateProduct(item.id, { image })} onRemove={() => updateProduct(item.id, { image: null })} compact />
                 <div className="mt-3 min-w-0">
                   <div className="min-w-0"><h4 className="truncate font-hand text-xl font-bold">{item.name}</h4><p className="text-xs text-muted-foreground">{isEggProduct(item) ? `${money(item.mrp)} per egg + ₹${site.markup} per bundle` : `MRP ${money(item.mrp)} + ₹${site.markup}`}</p></div>
@@ -895,13 +970,14 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
                 <label className="mt-3 grid gap-1 text-xs font-bold">Purchase / MRP price<Input key={item.mrp} type="number" min="0" step="0.01" defaultValue={item.mrp} onBlur={(event) => changePrice(item, event.target)} /></label>
                 <Counter label="Current stock" value={item.stock} minus={() => changeProduct(item.id,"stock",-1)} plus={() => changeProduct(item.id,"stock",1)} set={(value) => changeProduct(item.id, "stock", value - item.stock)} />
                 <Counter label="Restock threshold" value={item.threshold} minus={() => changeProduct(item.id,"threshold",-1)} plus={() => changeProduct(item.id,"threshold",1)} set={(value) => changeProduct(item.id, "threshold", value - item.threshold)} />
+                <label className="mt-3 grid gap-1 text-xs font-bold">Shelf section<select aria-label={`${item.name} shelf section`} value={item.category} onChange={(e) => { const category = e.target.value; setProducts((current) => current.map((product) => (product.id === item.id ? { ...product, category } : product))); void updateProduct(item.id, { category }); }} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm font-normal">{categoryOptions(item.category).map((name) => <option key={name}>{name}</option>)}</select></label>
                  <Button variant="destructive" className="mt-3 w-full" onClick={() => void deleteProduct(item)}><Trash2 /> Delete item</Button>
               </article>
             ))}
           </div>
         </section>
         <aside className="space-y-7">
-          <section className="border-2 border-dashed border-primary/35 bg-accent p-5"><h3 className="font-hand text-2xl font-bold">Customer Wishlist Requests</h3><p className="mt-1 text-xs">A request goes away by itself when you add that item (same name) with stock.{removeWish ? " Tap × to remove one." : ""}</p><div className="mt-4 space-y-3">{wishes.length === 0 && <p className="text-sm">No requests yet.</p>}{wishes.map(({ name, count }, index) => <div key={name} className={`grid ${removeWish ? "grid-cols-[auto_minmax(0,1fr)_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto]"} items-center gap-3 border-b border-foreground/10 pb-2`}><span className="grid size-7 place-items-center rounded-full bg-primary font-bold text-primary-foreground">{index+1}</span><span className="font-bold [overflow-wrap:anywhere]">{name}</span><span className="text-sm">{plural(count, "Request")}</span>{removeWish && <Button size="icon" variant="ghost" className="size-8" aria-label={`Remove request: ${name}`} onClick={() => removeWish(name)}><X /></Button>}</div>)}</div></section>
+          <section className="border-2 border-dashed border-primary/35 bg-accent p-5"><h3 className="font-hand text-2xl font-bold">Customer Wishlist Requests</h3><p className="mt-1 text-xs">A request goes away by itself when you add that item (same name) with stock.{removeWish ? " Tap × to remove one." : ""}</p><div className="mt-4 space-y-3">{wishes.length === 0 && <p className="text-sm">No requests yet.</p>}{wishes.map(({ name, count }, index) => <div key={name} className={`grid ${removeWish ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto]"} items-center gap-3 border-b border-foreground/10 pb-2`}><span className="grid size-7 place-items-center rounded-full bg-primary font-bold text-primary-foreground">{index+1}</span><span className="font-bold [overflow-wrap:anywhere]">{name}</span><span className="text-sm">{plural(count, "Request")}</span><Button size="icon" variant="ghost" className="size-8" aria-label={`Add ${name} to the shop`} title="Add this item" onClick={() => openAddForm(name)}><PackagePlus /></Button>{removeWish && <Button size="icon" variant="ghost" className="size-8" aria-label={`Remove request: ${name}`} onClick={() => removeWish(name)}><X /></Button>}</div>)}</div></section>
           <section>
             <h3 className="font-hand text-3xl font-bold">Incoming Orders</h3>{summary && summary.orderCount > orders.length && <p className="text-xs text-muted-foreground">Showing the latest {orders.length} of {summary.orderCount} orders.</p>}
             <div role="group" aria-label="Show orders" className="mt-3 grid grid-cols-3 gap-1 rounded-md border border-border bg-card p-1">
@@ -940,7 +1016,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
 
 /** What an offer card gives at checkout (see quote in lib/pricing.ts), under its text. */
 function OfferAmounts({ offer, change }: { offer: DailyOffer; change: (patch: Partial<DailyOffer>) => void }) {
-  const amount = (label: string, field: "percent" | "gift" | "pickUpTo", value: number, min: number, max: number) => (
+  const amount = (label: string, field: "percent" | "gift" | "pickUpTo" | "every", value: number, min: number, max: number) => (
     <label className="grid gap-1 text-xs font-bold">
       {label}
       <Input
@@ -975,8 +1051,21 @@ function OfferAmounts({ offer, change }: { offer: DailyOffer; change: (patch: Pa
       )}
       {offer.id === "tier50" && amount("Free chocolate (₹, 0 = none)", "gift", offer.gift ?? OFFER_DEFAULTS.tier50Gift, 0, 1000)}
       {offer.id === "tier100" && amount("Free pick: any item with MRP up to (₹)", "pickUpTo", offer.pickUpTo ?? FREE_PICK_VALUE, 1, 1000)}
+      {offer.id === "loyalty" && (
+        <div className="grid grid-cols-2 gap-2">
+          {amount("Every how many orders", "every", offer.every ?? OFFER_DEFAULTS.loyaltyEvery, 2, 100)}
+          {amount("Free pick: MRP up to (₹)", "pickUpTo", offer.pickUpTo ?? OFFER_DEFAULTS.loyaltyPickUpTo, 1, 1000)}
+        </div>
+      )}
     </div>
   );
+}
+
+/** 2nd, 3rd, 10th, 21st... */
+function ordinal(n: number): string {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
+  return `${n}${suffix}`;
 }
 
 /** In words, what checkout gives for an offer card (its amounts, not its text). */
@@ -997,12 +1086,105 @@ function offerGives(offer: DailyOffer): string {
       return (offer.gift ?? OFFER_DEFAULTS.tier50Gift) > 0 ? `a free ${rupees(offer.gift ?? OFFER_DEFAULTS.tier50Gift)} chocolate from ₹50` : "nothing (set an amount)";
     case "tier100":
       return offer.pickUpTo == null ? "a free item she picks, MRP up to ₹12, from ₹100" : `a free item she picks, MRP up to ${rupees(offer.pickUpTo)}, from ₹100`;
+    case "loyalty":
+      return `every ${ordinal(offer.every ?? OFFER_DEFAULTS.loyaltyEvery)} completed order: a free item she picks, MRP up to ${rupees(offer.pickUpTo ?? OFFER_DEFAULTS.loyaltyPickUpTo)} (on top of any other offer)`;
   }
 }
 
-type DashboardPage = "dashboard" | "manual" | "summary";
+/** What to buy: items at or under their restock level (how many, from what sells) and what customers asked
+ * for, to send on WhatsApp or copy. */
+function ShoppingList({ products, sold, wishes }: { products: Product[]; sold: { name: string; qty: number }[]; wishes: Wish[] }) {
+  const sales = new Map(sold.map((item) => [item.name, item.qty] as const));
+  const restock = products
+    .filter((item) => item.stock <= item.threshold)
+    .map((item) => ({ item, buy: restockBuy(item, sales.get(item.name) ?? 0) }))
+    .sort((a, b) => a.item.stock - b.item.stock || a.item.name.localeCompare(b.item.name));
+  const asked = wishes.slice(0, 8);
+  const today = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const text = [
+    `🛒 Kannagi Night Mart shopping list (${today})`,
+    ...(restock.length ? ["", "Restock:", ...restock.map(({ item, buy }) => `• ${item.name}: buy ${buy} (${item.stock} left)`)] : []),
+    ...(asked.length ? ["", "Customers asked for:", ...asked.map((wish) => `• ${wish.name} (${plural(wish.count, "request")})`)] : []),
+  ].join("\n");
+  const empty = !restock.length && !asked.length;
+  async function copy() {
+    try { await navigator.clipboard.writeText(text); toast.success("Shopping list copied."); } catch { toast.error("Couldn't copy here: select the list and copy it."); }
+  }
+  return (
+    <div aria-label="Shopping list" className="mt-3 rounded-md bg-card p-4 text-foreground">
+      {empty ? <p className="text-sm">Nothing to buy: stock is above every restock level and no one has asked for anything. ✨</p> : <pre className="whitespace-pre-wrap font-sans text-sm">{text}</pre>}
+      {!empty && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button asChild size="sm"><a href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer"><MessageCircle /> Send on WhatsApp</a></Button>
+          <Button size="sm" variant="outline" onClick={() => void copy()}><ClipboardCopy /> Copy</Button>
+        </div>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">Buys at least 5, enough for twice the restock level or what has sold so far.</p>
+    </div>
+  );
+}
+
+/** How many to buy: at least 5, enough for twice the restock level or what has sold so far. */
+const restockBuy = (item: Product, sold: number) => Math.max(5, Math.ceil((Math.max(item.threshold * 2, sold) - item.stock) / 5) * 5);
+
+/** The Restock page: items at or under their restock level, by shelf section (out of stock first in each),
+ * and the shopping list. */
+function RestockPanel({ products, sold, wishes, onEdit }: { products: Product[]; sold: { name: string; qty: number }[]; wishes: Wish[]; onEdit: (id: number) => void }) {
+  const [shoppingOpen, setShoppingOpen] = useState(false);
+  const sales = new Map(sold.map((item) => [item.name, item.qty] as const));
+  const low = products.filter((item) => item.stock <= item.threshold);
+  const bySection = new Map<string, Product[]>();
+  for (const item of low) {
+    const section = item.category || "Snacks";
+    bySection.set(section, [...(bySection.get(section) ?? []), item]);
+  }
+  const rank = (section: string) => (CATEGORIES.includes(section) ? CATEGORIES.indexOf(section) : CATEGORIES.length);
+  const sections = [...bySection.entries()]
+    .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+    .map(([section, items]) => [section, items.sort((a, b) => a.stock - b.stock || a.name.localeCompare(b.name))] as const);
+  const out = low.filter((item) => item.stock === 0).length;
+  return (
+    <section aria-labelledby="restock-title" className="mt-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2"><AlertTriangle className="size-7 text-primary" /><h3 id="restock-title" className="font-hand text-3xl font-bold">Restock</h3></div>
+        <Button variant="secondary" onClick={() => setShoppingOpen((open) => !open)} aria-expanded={shoppingOpen}><ShoppingCart /> Shopping list</Button>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">{low.length === 0 ? "Everything is stocked up ✨" : `${plural(low.length, "item")} at or under the restock level${out ? `, ${out} out of stock` : ""}. Customers don't see sold-out items.`}</p>
+      {shoppingOpen && <ShoppingList products={products} sold={sold} wishes={wishes} />}
+      <div className="mt-4 space-y-3">
+        {sections.map(([section, items]) => {
+          const empty = items.filter((item) => item.stock === 0).length;
+          return (
+            <details key={section} open className="group rounded-md border-2 border-foreground/10 bg-card shadow-[3px_4px_0_var(--shadow-color)]">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
+                <h4 className="min-w-0 flex-1 font-hand text-xl font-bold">{section}</h4>
+                <span className="text-xs font-bold text-muted-foreground">{plural(items.length, "item")}{empty ? ` · ${empty} out` : ""}</span>
+                <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+              </summary>
+              <ul aria-label={`Restock: ${section}`} className="grid grid-cols-1 gap-2 border-t border-border p-3 sm:grid-cols-2 lg:grid-cols-3">
+                {items.map((item) => (
+                  <li key={item.id} className="flex min-w-0 items-center gap-2 rounded-md bg-background px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold" title={item.name}>{item.name}</p>
+                      <p className="text-xs text-muted-foreground">Restock at {item.threshold} · buy {restockBuy(item, sales.get(item.name) ?? 0)}</p>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${item.stock === 0 ? "bg-alert text-alert-foreground" : "bg-accent text-accent-foreground"}`}>{item.stock === 0 ? "Out" : `${item.stock} left`}</span>
+                    <Button size="icon" variant="ghost" className="size-8 shrink-0" aria-label={`Update ${item.name}'s stock`} title="Update stock" onClick={() => onEdit(item.id)}><PackagePlus /></Button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+type DashboardPage = "dashboard" | "restock" | "manual" | "summary";
 const DASHBOARD_PAGES: { id: DashboardPage; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "restock", label: "Restock", icon: AlertTriangle },
   { id: "manual", label: "Manual sale", icon: Receipt },
   { id: "summary", label: "Summary", icon: TrendingUp },
 ];
@@ -1065,8 +1247,44 @@ function AnalyticsList({ title, items }: { title: string; items: string[] }) {
   return <article className="rounded-md border-2 border-dashed border-primary/30 bg-product p-4"><h4 className="font-hand text-xl font-bold">{title}</h4><ol className="mt-3 space-y-2 text-sm font-semibold">{items.length ? items.map((item, index) => <li key={item}>{index + 1}. {item}</li>) : <li className="text-muted-foreground">Place orders to see insights.</li>}</ol></article>;
 }
 
-function OrderHistory({ orders, onOpen, onPay, onEditProfile }: { orders: Order[]; onOpen: (order: Order) => void; onPay: (order: Order) => void; onEditProfile: () => void }) {
-  return <section className="mx-auto max-w-4xl px-4 py-10 sm:px-6 [overflow-wrap:anywhere]"><p className="font-hand text-lg font-bold text-primary">Saved to your account</p><div className="flex flex-wrap items-end justify-between gap-3"><h2 className="font-display text-4xl font-extrabold">My Orders</h2><Button variant="outline" size="sm" onClick={onEditProfile}>Edit my hostel details</Button></div>{orders.length === 0 ? <p className="mt-6 border-2 border-dashed border-border bg-card p-8 text-center text-muted-foreground">Your first order will appear here.</p> : <div className="mt-6 grid gap-4 sm:grid-cols-2">{orders.map((order) => <article key={order.id} className="rounded-md border-2 border-dashed border-primary/30 bg-card p-5 shadow-[4px_5px_0_var(--shadow-color)]"><div className="flex items-start justify-between gap-3"><div><h3 className="font-hand text-2xl font-bold">Order {orderLabel(order)}</h3><p className="text-xs text-muted-foreground">{order.createdAt ? new Date(order.createdAt).toLocaleString() : ""}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-xs font-bold ${orderState(order).waiting ? "bg-accent text-accent-foreground" : "bg-stock text-stock-foreground"}`}>{orderState(order).badge}</span></div><p className="mt-3 text-sm">{order.items.map((item) => `${item.name} ×${item.qty}`).join(", ")}</p><p className="mt-2 text-sm text-muted-foreground">{order.delivery} · {order.payment}</p><p className="text-sm font-semibold">{orderState(order).detail}</p>{needsPayment(order) && <Button size="sm" className="mt-2 w-full" onClick={() => onPay(order)}>Pay {money(order.total)} now</Button>}<div className="mt-3 flex items-center justify-between"><b className="text-xl text-primary">{money(order.total)}</b><Button size="sm" variant="outline" onClick={() => onOpen(order)}>View receipt</Button></div></article>)}</div>}</section>;
+function OrderHistory({ orders, onOpen, onPay, onEditProfile, onOrderAgain, loyalty }: { orders: Order[]; onOpen: (order: Order) => void; onPay: (order: Order) => void; onEditProfile: () => void; onOrderAgain: (order: Order) => void; loyalty: Loyalty | null }) {
+  return (
+    <section className="mx-auto max-w-4xl px-4 py-10 sm:px-6 [overflow-wrap:anywhere]">
+      <p className="font-hand text-lg font-bold text-primary">Saved to your account</p>
+      <div className="flex flex-wrap items-end justify-between gap-3"><h2 className="font-display text-4xl font-extrabold">My Orders</h2><Button variant="outline" size="sm" onClick={onEditProfile}>Edit my hostel details</Button></div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <NotificationsCard />
+        {loyalty?.active && <LoyaltyCard loyalty={loyalty} />}
+      </div>
+      {orders.length === 0 ? <p className="mt-6 border-2 border-dashed border-border bg-card p-8 text-center text-muted-foreground">Your first order will appear here.</p> : (
+        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          {orders.map((order) => (
+            <article key={order.id} className="rounded-md border-2 border-dashed border-primary/30 bg-card p-5 shadow-[4px_5px_0_var(--shadow-color)]">
+              <div className="flex items-start justify-between gap-3"><div><h3 className="font-hand text-2xl font-bold">Order {orderLabel(order)}</h3><p className="text-xs text-muted-foreground">{order.createdAt ? new Date(order.createdAt).toLocaleString() : ""}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-xs font-bold ${orderState(order).waiting ? "bg-accent text-accent-foreground" : "bg-stock text-stock-foreground"}`}>{orderState(order).badge}</span></div>
+              <p className="mt-3 text-sm">{order.items.map((item) => `${item.name} ×${item.qty}`).join(", ")}</p>
+              <p className="mt-2 text-sm text-muted-foreground">{order.delivery} · {order.payment}</p>
+              <p className="text-sm font-semibold">{orderState(order).detail}</p>
+              {needsPayment(order) && <Button size="sm" className="mt-2 w-full" onClick={() => onPay(order)}>Pay {money(order.total)} now</Button>}
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><b className="text-xl text-primary">{money(order.total)}</b><div className="flex gap-2"><Button size="sm" variant="secondary" onClick={() => onOrderAgain(order)} aria-label={`Order ${orderLabel(order)} again`}><RotateCcw /> Order again</Button><Button size="sm" variant="outline" onClick={() => onOpen(order)}>View receipt</Button></div></div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Her loyalty card: a stamp per completed order; every `every` stamps, a free item at checkout. */
+function LoyaltyCard({ loyalty }: { loyalty: Loyalty }) {
+  return (
+    <section aria-labelledby="loyalty-title" className="rounded-md border-2 border-dashed border-primary/40 bg-banner p-4 shadow-[3px_4px_0_var(--shadow-color)]">
+      <h3 id="loyalty-title" className="font-hand text-2xl font-bold">🎟️ Loyalty card</h3>
+      <div aria-label={`${loyalty.stamps} of ${loyalty.every} stamps`} className="mt-2 flex flex-wrap gap-1">
+        {Array.from({ length: loyalty.every }, (_, index) => <span key={index} aria-hidden="true" className={`grid size-6 place-items-center rounded-full border-2 text-xs ${index < loyalty.stamps ? "border-primary bg-primary text-primary-foreground" : "border-primary/30 bg-card"}`}>{index < loyalty.stamps ? "★" : ""}</span>)}
+      </div>
+      <p className="mt-2 text-sm font-semibold">{loyalty.rewards > 0 ? `🎁 ${loyalty.rewards > 1 ? `${loyalty.rewards} rewards` : "A reward"} ready: pick a free item (MRP up to ₹${loyalty.pickUpTo}) at checkout.` : `${loyalty.every - loyalty.stamps} more completed ${loyalty.every - loyalty.stamps === 1 ? "order" : "orders"} for a free item (MRP up to ₹${loyalty.pickUpTo}).`}</p>
+    </section>
+  );
 }
 
 function ProfileForm({ profile, setProfile, submit, close }: { profile: CustomerProfile; setProfile: React.Dispatch<React.SetStateAction<CustomerProfile>>; submit: (event: FormEvent<HTMLFormElement>) => void; close?: () => void }) {
@@ -1297,7 +1515,7 @@ function OrderReceipt({ order, fresh, onPay, close }: { order: Order; fresh: boo
   return <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/55 p-4 backdrop-blur-sm"><section className="max-h-[92vh] w-full max-w-sm overflow-y-auto rounded-lg border-2 border-dashed border-primary/50 bg-card p-6 text-center shadow-[7px_8px_0_var(--shadow-color)]">{order.cancelled ? <div className="mx-auto grid size-14 place-items-center rounded-full bg-destructive text-destructive-foreground"><X className="size-7" /></div> : orderState(order).waiting ? <div className="mx-auto grid size-14 place-items-center rounded-full bg-accent text-accent-foreground"><Hourglass className="size-7" /></div> : <div className="mx-auto grid size-14 place-items-center rounded-full bg-stock text-stock-foreground"><Check className="size-7" /></div>}<p className="mt-3 font-hand text-lg font-bold text-primary">{order.cancelled || orderState(order).waiting ? orderState(order).badge : fresh ? "Order placed!" : order.createdAt ? new Date(order.createdAt).toLocaleString() : "Receipt"}</p><h2 className="font-display text-4xl font-extrabold">Order {orderLabel(order)}</h2><p className="mt-2 text-sm text-muted-foreground">{order.delivery === "Pickup" ? "Tell the shopkeeper this order ID when you pick up your snacks." : "Keep this number for delivery updates."}</p><div className="mt-4 rounded-md bg-product p-4 text-left text-sm"><p><b>{order.items.map((item) => `${item.name} ×${item.qty}`).join(", ")}</b></p><p className="mt-1">{order.delivery} · {order.payment}</p><p className="mt-1 font-semibold">{orderState(order).detail}</p>{order.discountLabel && <p className="mt-1 font-semibold">{order.discountLabel}{order.discount > 0 ? ` (−${money(order.discount)})` : ""}</p>}{order.freebies.length > 0 && <p className="font-semibold">Free: {order.freebies.join(", ")}</p>}{order.onRequest && <p className="mt-1 text-xs">Placed while the store was offline — the shopkeeper will confirm it.</p>}<p className="mt-2 text-xl font-extrabold text-primary">Total {money(order.total)}</p></div>{order.delivery === "Pickup" && !order.cancelled && <div className="mt-4 rounded-md bg-accent p-3 text-sm font-semibold text-accent-foreground"><p>If {site.pickupPoint} is closed or the shopkeeper is unavailable, call {spacedPhone(site.helpPhone)} for assistance.</p><Button asChild variant="outline" className="mt-3 w-full bg-card"><a href={`tel:+91${site.helpPhone}`}><Phone /> Call {spacedPhone(site.helpPhone)}</a></Button></div>}{needsPayment(order) && <Button onClick={onPay} className="mt-5 w-full">Pay {money(order.total)} by UPI now</Button>}<Button onClick={close} variant={needsPayment(order) ? "outline" : "default"} className={needsPayment(order) ? "mt-2 w-full" : "mt-5 w-full"}>Done</Button></section></div>;
 }
 
-function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, couponRule, storeOnline, profile, onClose, onComplete }: { cartItems: (Product & { qty: number })[]; products: Product[]; coupon: Coupon | null; firstOrder: boolean; dailyOffers: DailyOffer[]; couponRule: CouponRule; storeOnline: boolean; profile: CustomerProfile; onClose: () => void; onComplete: (input: PlaceOrderInput) => Promise<void> }) {
+function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, couponRule, storeOnline, loyalty, profile, onClose, onComplete }: { cartItems: (Product & { qty: number })[]; products: Product[]; coupon: Coupon | null; firstOrder: boolean; dailyOffers: DailyOffer[]; couponRule: CouponRule; storeOnline: boolean; loyalty: Loyalty | null; profile: CustomerProfile; onClose: () => void; onComplete: (input: PlaceOrderInput) => Promise<void> }) {
   const site = useSite();
   const rules = priceRules(site);
   // Only the options the admin has turned on (at least one of each always is).
@@ -1310,6 +1528,7 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
   const [name, setName] = useState(profile.fullName); const [phone, setPhone] = useState(profile.phone); const [room, setRoom] = useState(profile.roomNumber); const [block, setBlock] = useState(profile.block);
   const [placing, setPlacing] = useState(false);
   const [freeItem, setFreeItem] = useState("");
+  const [rewardItem, setRewardItem] = useState("");
   const previousDeal = useRef<string | undefined>(undefined);
 
   const lines = useMemo(() => cartItems.map((item) => ({ product: item, qty: item.qty })), [cartItems]);
@@ -1335,6 +1554,10 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
   }, [best]);
 
   const getsFreePick = Boolean(best?.freePick);
+  // Her loyalty reward (on top of any offer): a free item up to the card's MRP, still in stock after her
+  // cart and the other free pick. Left empty, it's kept for a later order.
+  const rewardReady = Boolean(loyalty?.active && loyalty.rewards > 0);
+  const rewardChoices = products.filter((item) => item.mrp <= (loyalty?.pickUpTo ?? 0) && item.stock - (cartItems.find((line) => line.id === item.id)?.qty ?? 0) - (getsFreePick && freeItem === item.name ? 1 : 0) > 0);
   const gift = best?.gift ?? 0;
   const freeDelivery = Boolean(best?.freeDelivery);
 
@@ -1353,13 +1576,14 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
         delivery,
         payment,
         ...(getsFreePick && freeItem ? { freePick: freeItem } : {}),
+        ...(rewardReady && rewardItem ? { loyaltyPick: rewardItem } : {}),
         ...(delivery === "Room Delivery" ? { name: name.trim(), phone: phone.trim(), block, room: room.trim() } : {}),
         expectedTotal: total,
       });
     } finally {
       setPlacing(false);
     }
-  }, [block, cartItems, delivery, freeItem, getsFreePick, name, onComplete, payment, phone, placing, room, total]);
+  }, [block, cartItems, delivery, freeItem, getsFreePick, name, onComplete, payment, phone, placing, rewardItem, rewardReady, room, total]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/50 backdrop-blur-sm sm:items-center sm:p-6" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -1395,6 +1619,17 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
                     </select>
                   </label>
                 )}
+              </div>
+            )}
+
+            {rewardReady && loyalty && (
+              <div className="mt-4 border-2 border-dashed border-stock bg-stock/25 p-4">
+                <p className="font-hand text-xl font-bold">🎟️ Your loyalty reward</p>
+                <p className="mt-1 text-sm">{loyalty.rewards > 1 ? `${loyalty.rewards} rewards` : "A reward"} ready: a free item with MRP up to ₹{loyalty.pickUpTo}, on top of your other offers. Pick one now or keep it for later.</p>
+                <select aria-label="Loyalty free item" value={rewardItem} onChange={(e) => setRewardItem(e.target.value)} className="mt-2 h-10 w-full rounded-md border border-input bg-card px-2 text-sm">
+                  <option value="">Keep it for a later order</option>
+                  {rewardChoices.map((item) => <option key={item.id} value={item.name}>{item.emoji} {item.name}</option>)}
+                </select>
               </div>
             )}
 

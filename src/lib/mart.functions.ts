@@ -41,7 +41,7 @@ const promotions = z.object({
   dailyOffers: z
     .array(
       z.object({
-        id: z.enum(["tier50", "tier100", "first", "bulk"]),
+        id: z.enum(["tier50", "tier100", "first", "bulk", "loyalty"]),
         title: z.string().max(80),
         note: z.string().max(200),
         icon: z.string().max(16),
@@ -51,9 +51,10 @@ const promotions = z.object({
         freeDelivery: z.boolean().nullish(),
         gift: z.number().int().min(0).max(1000).nullish(),
         pickUpTo: z.number().int().min(1).max(1000).nullish(),
+        every: z.number().int().min(2).max(100).nullish(),
       }),
     )
-    .max(4),
+    .max(5),
   wheelPrizes: z
     .array(z.object({ code: text(20), label: text(80), shortLabel: z.string().max(80), icon: z.string().max(16), kind: couponKind.nullable(), active: z.boolean() }))
     .min(2)
@@ -167,6 +168,7 @@ export const placeOrder = createServerFn({ method: "POST" })
         block: block.optional(),
         room: z.string().trim().max(20).optional(),
         expectedTotal: z.number().min(0).max(10_000_000).optional(),
+        loyaltyPick: z.string().trim().max(80).optional(),
       })
       .parse(data),
   )
@@ -201,7 +203,7 @@ export const removeWish = createServerFn({ method: "POST" })
   .handler(async ({ data }) => (await server()).callBackend<null>("/site-admin/wishes/remove", "POST", { name: data.name }));
 
 export const createProduct = createServerFn({ method: "POST" })
-  .validator((data: unknown) => z.object({ name: text(80), mrp: z.number().positive().max(100_000), stock: z.number().int().min(0).max(100_000), image: image.optional() }).parse(data))
+  .validator((data: unknown) => z.object({ name: text(80), mrp: z.number().positive().max(100_000), stock: z.number().int().min(0).max(100_000), category: text(40).optional(), image: image.optional() }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<Product>("/admin/products", "POST", data));
 
 export const updateProduct = createServerFn({ method: "POST" })
@@ -213,6 +215,7 @@ export const updateProduct = createServerFn({ method: "POST" })
           stockDelta: z.number().int().min(-100_000).max(100_000).optional(),
           threshold: z.number().int().min(0).max(100_000).optional(),
           mrp: z.number().positive().max(100_000).optional(),
+          category: text(40).optional(),
           image: image.nullable().optional(),
         }),
       })
@@ -251,7 +254,7 @@ export const setStore = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ override: z.enum(["auto", "online", "offline"]) }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<StoreStatus>("/admin/store", "PUT", data));
 
-// --- order alerts on this device (shopkeepers and admins; see order-alerts.ts) ---
+// --- notifications on this device (see order-alerts.ts): new orders for the shop, her own news for a customer ---
 
 // A browser's push address (the backend accepts only the browsers' push services).
 const endpoint = z.object({ endpoint: z.string().trim().url().max(1000) });
@@ -269,3 +272,8 @@ export const turnOffAlerts = createServerFn({ method: "POST" })
 export const testAlert = createServerFn({ method: "POST" })
   .validator((data: unknown) => endpoint.parse(data))
   .handler(async ({ data }) => (await server()).callBackend<AlertTest>("/alerts/test", "POST", data));
+
+/** Admins: today's summary (sent to them at closing time) to this device, now. */
+export const summaryAlert = createServerFn({ method: "POST" })
+  .validator((data: unknown) => endpoint.parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<AlertTest>("/alerts/summary", "POST", data));

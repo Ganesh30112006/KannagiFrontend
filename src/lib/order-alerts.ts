@@ -1,7 +1,8 @@
-// Order alerts: a notification on this phone or laptop for each new order, even with the website closed
-// (Web Push). Turning them on asks the browser for permission and for a push address for this site at its
-// push service (Google, Apple, Mozilla, Microsoft); the API sends each new order there and public/sw.js
-// shows it. They're per device, only while signed in here: signing out turns them off (api.logout).
+// Notifications on this phone or laptop, even with the website closed (Web Push): each new order for a
+// shopkeeper or admin (Order alerts), her own news for a customer (her order confirmed, ready or cancelled;
+// an item she asked for in the shop). Turning them on asks the browser for permission and for a push
+// address for this site at its push service (Google, Apple, Mozilla, Microsoft); the API sends there and
+// public/sw.js shows it. They're per device, only while signed in here: signing out turns them off (api.logout).
 import { unwrap } from "./api";
 import * as fn from "./mart.functions";
 import type { AlertDevice, AlertTest } from "./mart-types";
@@ -162,6 +163,13 @@ export async function sendTestAlert(): Promise<AlertTest> {
   const sub = supported() ? await subscription() : null;
   if (!sub) return { sent: false, detail: "Order alerts aren't on for this device." };
   return unwrap(fn.testAlert({ data: { endpoint: sub.endpoint } }));
+}
+
+/** Admins: today's summary to this device now (it goes to every admin's at closing time). */
+export async function sendSummaryAlert(): Promise<AlertTest> {
+  const sub = supported() ? await subscription() : null;
+  if (!sub) return { sent: false, detail: "Order alerts aren't on for this device." };
+  return unwrap(fn.summaryAlert({ data: { endpoint: sub.endpoint } }));
 }
 
 /** Signing out on this device turns its alerts off (while the sign-in still lets the server be told). */

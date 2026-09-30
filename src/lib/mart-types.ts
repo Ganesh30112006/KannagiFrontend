@@ -7,6 +7,9 @@ export type Product = {
   threshold: number;
   category: string;
   image?: string;
+  /** Shelf badges: among the best sellers of the last two weeks; added in the last week (the newest few). */
+  popular?: boolean;
+  isNew?: boolean;
 };
 
 export type CouponKind =
@@ -68,12 +71,14 @@ export type PlaceOrderInput = {
   room?: string;
   /** The total the customer saw; the server refuses the order if it no longer matches. */
   expectedTotal?: number;
+  /** Her loyalty reward, used on this order: the free item she picked. */
+  loyaltyPick?: string;
 };
 
 /** An offer card: its text, and what checkout gives (pricing.ts quote). An amount not set (null or left
  * out) works as it always has, in brackets. */
 export type DailyOffer = {
-  id: "tier50" | "tier100" | "first" | "bulk";
+  id: "tier50" | "tier100" | "first" | "bulk" | "loyalty";
   title: string;
   note: string;
   icon: string;
@@ -84,8 +89,10 @@ export type DailyOffer = {
   freeDelivery?: boolean | null;
   /** A free chocolate worth ₹: ₹50+ (5), cart over ₹200 (none). */
   gift?: number | null;
-  /** ₹100+: a free item she picks, MRP up to ₹ (a ₹10 item: MRP up to ₹12). */
+  /** ₹100+ and loyalty: a free item she picks, MRP up to ₹ (₹100+: a ₹10 item, MRP up to ₹12; loyalty: ₹10). */
   pickUpTo?: number | null;
+  /** Loyalty: every Nth completed order earns a free pick (10). */
+  every?: number | null;
 };
 export type WheelPrize = {
   code: string;
@@ -124,7 +131,11 @@ export type User = {
 };
 
 export type Wish = { name: string; count: number };
-export type WishResult = Wish & { alreadyRequested: boolean };
+/** onShelf: it's in stock right now, so nothing was saved. */
+export type WishResult = Wish & { alreadyRequested: boolean; onShelf?: boolean };
+
+/** A customer's loyalty card: every `every` completed orders earn a free item she picks, MRP up to ₹pickUpTo. */
+export type Loyalty = { active: boolean; every: number; pickUpTo: number; stamps: number; rewards: number };
 
 export type SpinStatus = { spunToday: boolean; coupon?: Coupon | null };
 export type SpinResult = {
@@ -157,6 +168,7 @@ export type Bootstrap = {
   store: StoreStatus;
   wishes: Wish[];
   spin: SpinStatus;
+  loyalty?: Loyalty;
 };
 /** What can change while the page is open. */
 export type Live = { products: Product[]; store: StoreStatus; spin: SpinStatus };
@@ -171,6 +183,7 @@ export type SyncResult = {
   wishes?: Wish[];
   orders?: Order[];
   firstOrderAvailable?: boolean;
+  loyalty?: Loyalty;
   admin?: { orders: AdminOrder[]; summary: SalesSummary; manualSales?: ManualSale[] };
 };
 

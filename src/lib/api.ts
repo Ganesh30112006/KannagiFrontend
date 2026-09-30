@@ -83,8 +83,8 @@ export const api = {
     /** Admins only (the API checks). */
     removeWish: (name: string) => change(() => fn.removeWish({ data: { name } })),
     setPaymentReceived: (id: number, received: boolean) => change(() => fn.setPaymentReceived({ data: { id, received } })),
-    createProduct: (product: { name: string; mrp: number; stock: number; image?: string }) => change(() => fn.createProduct({ data: product })),
-    updateProduct: (id: number, changes: { stock?: number; stockDelta?: number; threshold?: number; mrp?: number; image?: string | null }) =>
+    createProduct: (product: { name: string; mrp: number; stock: number; category?: string; image?: string }) => change(() => fn.createProduct({ data: product })),
+    updateProduct: (id: number, changes: { stock?: number; stockDelta?: number; threshold?: number; mrp?: number; category?: string; image?: string | null }) =>
       change<Product>(() => fn.updateProduct({ data: { id, changes } })),
     deleteProduct: (id: number) => change(() => fn.deleteProduct({ data: { id } })),
     savePromotions: (promotions: Promotions) => change(() => fn.savePromotions({ data: promotions })),
