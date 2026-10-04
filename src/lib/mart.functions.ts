@@ -56,7 +56,20 @@ const promotions = z.object({
     )
     .max(5),
   wheelPrizes: z
-    .array(z.object({ code: text(20), label: text(80), shortLabel: z.string().max(80), icon: z.string().max(16), kind: couponKind.nullable(), active: z.boolean() }))
+    .array(
+      z.object({
+        code: text(20),
+        label: text(80),
+        shortLabel: z.string().max(80),
+        icon: z.string().max(16),
+        kind: couponKind.nullable(),
+        active: z.boolean(),
+        // What the slice gives and the cart it needs (see WheelPrize in mart-types.ts).
+        minOrder: z.number().int().min(0).max(5000).nullish(),
+        minItems: z.number().int().min(0).max(50).nullish(),
+        amount: z.number().int().min(1).max(500).nullish(),
+      }),
+    )
     .min(2)
     .max(16),
   couponRule,
@@ -230,6 +243,11 @@ export const deleteProduct = createServerFn({ method: "POST" })
 export const savePromotions = createServerFn({ method: "POST" })
   .validator((data: unknown) => promotions.parse(data))
   .handler(async ({ data }) => (await server()).callBackend<Promotions>("/admin/promotions", "PUT", data));
+
+/** Spin & Win on or off for customers, at once. */
+export const switchWheel = createServerFn({ method: "POST" })
+  .validator((data: unknown) => z.object({ enabled: z.boolean() }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<Promotions>("/admin/wheel", "PUT", data));
 
 /** A sale made in person: its items come off the stock and it counts in sales and profit. */
 export const recordManualSale = createServerFn({ method: "POST" })

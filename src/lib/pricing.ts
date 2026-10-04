@@ -1,15 +1,62 @@
 // Checkout maths for the preview. Mirrors backend/app/services.py exactly, in integer paise, so the
 // total the customer sees (and may pay by UPI) is the total the server records. The server re-checks
 // every order and refuses one whose total no longer matches. Keep the two files in step.
-import type { Coupon, CouponKind, CouponRule, DailyOffer, Delivery, Product } from "./mart-types";
+import type { Coupon, CouponKind, CouponRule, DailyOffer, Delivery, Product, WheelPrize } from "./mart-types";
 
 export const PREMIUM_PRICE = 45;
-/** The free ₹10 item of a spin coupon, and of the ₹100+ offer unless the shop sets its own limit: any item
- * with an MRP up to ₹12. */
+/** The free ₹10 item of the ₹100+ offer unless the shop sets its own limit (and of a spin coupon from
+ * before slices had amounts): any item with an MRP up to ₹12. */
 export const FREE_PICK_VALUE = 10;
 export const FREE_PICK_MAX_PRICE = 12;
-/** Rupees off for each coupon kind (freeSnack100 gives a free ₹10 item instead). */
-export const COUPON_VALUES: Record<CouponKind, number> = { free60: 10, three5: 5, freeSnack100: 10, halfDelivery: 5, four10: 10, premium5: 5 };
+
+// --- spin coupons: a slice gives one kind of reward on the cart conditions the shop set (see
+// CouponTerms in backend/app/services.py; keep the two in step) ---
+const DELIVERY_COUPONS: CouponKind[] = ["free60", "halfDelivery"];
+/** premium5: on 2 items of ₹45+. */
+export const PREMIUM_ITEMS = 2;
+/** What a slice starts with when the shopkeeper picks its reward (the original rules). */
+export const COUPON_DEFAULTS: Record<CouponKind, { minOrder: number; minItems: number; amount: number | null }> = {
+  free60: { minOrder: 60, minItems: 0, amount: null },
+  halfDelivery: { minOrder: 0, minItems: 0, amount: null },
+  three5: { minOrder: 0, minItems: 3, amount: 5 },
+  four10: { minOrder: 0, minItems: 4, amount: 10 },
+  premium5: { minOrder: 0, minItems: 0, amount: 5 },
+  freeSnack100: { minOrder: 100, minItems: 0, amount: FREE_PICK_VALUE },
+};
+export const isDeliveryCoupon = (kind: CouponKind) => DELIVERY_COUPONS.includes(kind);
+export type CouponTerms = Pick<Coupon, "kind" | "minOrder" | "minItems" | "amount" | "pickUpTo">;
+
+/** A wheel slice's reward (null: Better Luck), its amounts filled in. */
+export function prizeTerms(prize: Pick<WheelPrize, "kind" | "minOrder" | "minItems" | "amount">): CouponTerms | null {
+  if (!prize.kind) return null;
+  const defaults = COUPON_DEFAULTS[prize.kind];
+  const amount = isDeliveryCoupon(prize.kind) ? 0 : (prize.amount ?? defaults.amount ?? 0);
+  return {
+    kind: prize.kind,
+    minOrder: prize.minOrder ?? defaults.minOrder,
+    minItems: prize.minItems ?? defaults.minItems,
+    amount,
+    pickUpTo: prize.kind === "freeSnack100" ? (prize.amount ?? FREE_PICK_MAX_PRICE) : 0,
+  };
+}
+
+/** What a slice says (its label, and the short text on the wheel), made from what it gives; the server
+ * writes the same (prize_text in backend/app/services.py). */
+export function prizeText(terms: CouponTerms | null): { label: string; shortLabel: string } {
+  if (!terms) return { label: "Better Luck Next Time", shortLabel: "BETTER LUCK!" };
+  const a = terms.amount;
+  const [gives, short] =
+    terms.kind === "free60" ? ["FREE Delivery", "FREE DELIVERY"]
+    : terms.kind === "halfDelivery" ? ["50% OFF Room Delivery", "½ DELIVERY"]
+    : terms.kind === "premium5" ? [`₹${a} OFF on ${PREMIUM_ITEMS} Premium Items`, `${PREMIUM_ITEMS} PREMIUM ₹${a} OFF`]
+    : terms.kind === "freeSnack100" ? [`Free ₹${a} Snack`, `FREE ₹${a} SNACK`]
+    : [`₹${a} OFF`, `₹${a} OFF`];
+  let label = gives;
+  let shortLabel = short;
+  if (terms.minOrder) { label += ` on ₹${terms.minOrder}+ Orders`; shortLabel += ` ₹${terms.minOrder}+`; }
+  if (terms.minItems) { label += ` with ${terms.minItems}+ Items`; shortLabel += ` · ${terms.minItems}+ ITEMS`; }
+  return { label, shortLabel };
+}
 /** What each offer gives unless the shop set its own amounts (see DailyOffer). */
 // loyalty: every 10th completed order, a free item up to ₹10 (it stacks, so quote() doesn't price it).
 export const OFFER_DEFAULTS = { firstPercent: 10, bulkPercent: 20, tier50Gift: 5, loyaltyEvery: 10, loyaltyPickUpTo: 10 };
@@ -22,12 +69,12 @@ export const giftText = (rupees: number) => `₹${rupees} chocolate (free)`;
 export type PriceRules = { markup: number; deliveryFee: number };
 export const DEFAULT_RULES: PriceRules = { markup: 5, deliveryFee: 10 };
 
-/** Paise off for a coupon. The delivery coupons follow the delivery fee: free60 is the whole fee,
+/** Paise off for a coupon. The delivery coupons follow the delivery fee (paise): free60 is the whole fee,
  * halfDelivery half of it (see coupon_value in backend/app/services.py). */
-export function couponValue(kind: CouponKind, deliveryFee: number): number {
-  if (kind === "free60") return deliveryFee;
-  if (kind === "halfDelivery") return Math.floor(deliveryFee / 2);
-  return COUPON_VALUES[kind] * 100;
+export function couponValue(terms: CouponTerms, deliveryFee: number): number {
+  if (terms.kind === "free60") return deliveryFee;
+  if (terms.kind === "halfDelivery") return Math.floor(deliveryFee / 2);
+  return terms.amount * 100;
 }
 
 export const toPaise = (rupees: number) => Math.round(rupees * 100);
@@ -70,31 +117,14 @@ export type CouponCheck = { eligible: boolean; reason: string };
 
 const more = (count: number, word: string) => `${count} more ${word}${count === 1 ? "" : "s"}`;
 
+/** Whether her coupon applies to this cart, and if not, what's missing (coupon_eligible on the server). */
 export function couponStatus(coupon: Coupon | null, cart: CartSummary, delivery: Delivery, now = Date.now()): CouponCheck {
   if (!coupon || coupon.expiresAt <= now) return { eligible: false, reason: "This coupon has expired." };
-  const room = delivery === "Room Delivery";
-  const short = (paise: number) => `Add ${money(toRupees(paise))} more to use this coupon!`;
-  switch (coupon.kind) {
-    case "free60":
-      if (cart.subtotal < 6000) return { eligible: false, reason: short(6000 - cart.subtotal) };
-      if (!room) return { eligible: false, reason: "Choose Room Delivery to use this coupon!" };
-      break;
-    case "three5":
-      if (cart.itemCount < 3) return { eligible: false, reason: `Add ${more(3 - cart.itemCount, "item")} to use this coupon!` };
-      break;
-    case "freeSnack100":
-      if (cart.subtotal < 10000) return { eligible: false, reason: short(10000 - cart.subtotal) };
-      break;
-    case "halfDelivery":
-      if (!room) return { eligible: false, reason: "Choose Room Delivery to unlock 50% off delivery!" };
-      break;
-    case "four10":
-      if (cart.itemCount < 4) return { eligible: false, reason: `Add ${more(4 - cart.itemCount, "item")} to use this coupon!` };
-      break;
-    case "premium5":
-      if (cart.premiumCount < 2) return { eligible: false, reason: `Add ${more(2 - cart.premiumCount, "premium item")} (₹45+) to use this coupon!` };
-      break;
-  }
+  const minOrder = coupon.minOrder * 100;
+  if (cart.subtotal < minOrder) return { eligible: false, reason: `Add ${money(toRupees(minOrder - cart.subtotal))} more to use this coupon!` };
+  if (cart.itemCount < coupon.minItems) return { eligible: false, reason: `Add ${more(coupon.minItems - cart.itemCount, "item")} to use this coupon!` };
+  if (coupon.kind === "premium5" && cart.premiumCount < PREMIUM_ITEMS) return { eligible: false, reason: `Add ${more(PREMIUM_ITEMS - cart.premiumCount, "premium item")} (₹${PREMIUM_PRICE}+) to use this coupon!` };
+  if (isDeliveryCoupon(coupon.kind) && delivery !== "Room Delivery") return { eligible: false, reason: "Choose Room Delivery to use this coupon!" };
   return { eligible: true, reason: "Coupon unlocked and ready!" };
 }
 
@@ -176,12 +206,13 @@ export function quote({ lines, delivery, firstOrder, coupon, dailyOffers, coupon
   if (coupon && couponStatus(coupon, cart, delivery, now).eligible) {
     const [savings, couponDeal] =
       coupon.kind === "freeSnack100"
-        ? [FREE_PICK_VALUE * 100, deal("coupon", coupon.label, { freePick: true })]
+        ? [coupon.amount * 100, deal("coupon", coupon.label, { freePick: true, pickValue: coupon.amount, pickUpTo: coupon.pickUpTo })]
         : (() => {
-            const amount = Math.min(couponValue(coupon.kind, rules.deliveryFee * 100), cart.subtotal + fee);
+            const amount = Math.min(couponValue(coupon, rules.deliveryFee * 100), cart.subtotal + fee);
             return [amount, deal("coupon", coupon.label, { discount: amount })] as const;
           })();
-    if (couponRule === "coupon") return finish(cart.subtotal, fee, couponDeal);
+    // A coupon that would save nothing here (free room delivery when delivery is already free) is kept.
+    if (savings > 0 && couponRule === "coupon") return finish(cart.subtotal, fee, couponDeal);
     candidates.push([savings, couponDeal]);
   }
 

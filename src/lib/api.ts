@@ -88,6 +88,7 @@ export const api = {
       change<Product>(() => fn.updateProduct({ data: { id, changes } })),
     deleteProduct: (id: number) => change(() => fn.deleteProduct({ data: { id } })),
     savePromotions: (promotions: Promotions) => change(() => fn.savePromotions({ data: promotions })),
+    switchWheel: (enabled: boolean) => change(() => fn.switchWheel({ data: { enabled } })),
     setStore: (override: StoreOverride) => change(() => fn.setStore({ data: { override } })),
     recordManualSale: (sale: ManualSaleInput) => change(() => fn.recordManualSale({ data: sale })),
     undoManualSale: (id: number) => change(() => fn.undoManualSale({ data: { id } })),

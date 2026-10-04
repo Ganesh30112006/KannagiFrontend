@@ -14,6 +14,7 @@ export type Product = {
 
 export type CouponKind =
   "free60" | "three5" | "freeSnack100" | "halfDelivery" | "four10" | "premium5";
+/** A spin coupon, with the terms of the slice it was won on (CouponTerms in backend/app/services.py). */
 export type Coupon = {
   code: string;
   label: string;
@@ -21,6 +22,13 @@ export type Coupon = {
   icon: string;
   kind: CouponKind;
   expiresAt: number;
+  /** ₹, items subtotal. */
+  minOrder: number;
+  minItems: number;
+  /** ₹ off; freeSnack100: the free item's value; 0 for the delivery coupons. */
+  amount: number;
+  /** freeSnack100: the free item's MRP up to ₹ (else 0). */
+  pickUpTo: number;
 };
 
 export type Delivery = "Pickup" | "Room Delivery";
@@ -94,6 +102,8 @@ export type DailyOffer = {
   /** Loyalty: every Nth completed order earns a free pick (10). */
   every?: number | null;
 };
+/** A wheel slice: kind is what it gives (null: Better Luck; three5 and four10 are both "₹ off"), on the
+ * cart conditions the shop set. The server writes label and shortLabel from those (prizeText). */
 export type WheelPrize = {
   code: string;
   label: string;
@@ -101,6 +111,11 @@ export type WheelPrize = {
   icon: string;
   kind: CouponKind | null;
   active: boolean;
+  /** ₹, items subtotal (null on Better Luck). */
+  minOrder?: number | null;
+  minItems?: number | null;
+  /** ₹ off, or the free snack's value (null on the delivery slices and Better Luck). */
+  amount?: number | null;
 };
 /** Which reward applies when a spin coupon and an automatic offer both could: the bigger saving, or always the coupon. */
 export type CouponRule = "best" | "coupon";
@@ -109,6 +124,8 @@ export type Promotions = {
   dailyOffers: DailyOffer[];
   wheelPrizes: WheelPrize[];
   couponRule: CouponRule;
+  /** Customers see Spin & Win and can spin (switched at once, not with Save). */
+  wheelEnabled?: boolean;
 };
 
 export type StoreOverride = "auto" | "online" | "offline";

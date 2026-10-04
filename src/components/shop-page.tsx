@@ -50,7 +50,7 @@ import { ROLE_KEY } from "@/lib/login-role";
 import { callLink, formatMobile, isMobile, whatsappChat } from "@/lib/phone";
 import { DEFAULT_SITE, hoursLabel, priceRules, shopWhatsApp, SiteContext, spacedPhone, useSite } from "@/lib/site";
 import { upiPayLink } from "@/lib/upi";
-import { cartSummary, couponStatus, FREE_PICK_MAX_PRICE, FREE_PICK_VALUE, isEggProduct, lineTotal, money, OFFER_DEFAULTS, quote, toRupees } from "@/lib/pricing";
+import { cartSummary, COUPON_DEFAULTS, couponStatus, FREE_PICK_MAX_PRICE, FREE_PICK_VALUE, isDeliveryCoupon, isEggProduct, lineTotal, money, OFFER_DEFAULTS, PREMIUM_ITEMS, PREMIUM_PRICE, prizeTerms, prizeText, quote, toRupees } from "@/lib/pricing";
 import type {
   AdminOrder,
   Block,
@@ -89,20 +89,6 @@ const PAYMENT_SYNC_MS = 4_000; // a customer waiting for the shopkeeper to confi
 const BACKGROUND_DASHBOARD_SYNC_MS = 30_000; // the shopkeeper's page in a background tab
 const NO_REVS: KnownRevs = { catalog: -1, orders: -1, adminOrders: -1, promotions: -1, wishes: -1, site: -1 };
 
-// Shown on the wheel only if fewer than two prizes are switched on (the server spins the same ones).
-const defaultWheelPrizes: WheelPrize[] = [
-  { code: "DROP60", label: "FREE Delivery on ₹60+ Orders", shortLabel: "FREE DELIVERY ₹60+", icon: "🚚", kind: "free60", active: true },
-  { code: "TRIO5", label: "Buy Any 3 Items & Get ₹5 OFF", shortLabel: "3 ITEMS ₹5 OFF", icon: "🍪", kind: "three5", active: true },
-  { code: "SNACK100", label: "Free ₹10 Snack on ₹100+ Orders", shortLabel: "FREE SNACK ₹100+", icon: "🎁", kind: "freeSnack100", active: true },
-  { code: "HALFDROP", label: "50% OFF Room Delivery", shortLabel: "½ DELIVERY", icon: "🛵", kind: "halfDelivery", active: true },
-  { code: "FOUR10", label: "Buy 4 Items & Get ₹10 OFF", shortLabel: "4 ITEMS ₹10 OFF", icon: "🎉", kind: "four10", active: true },
-  { code: "PREMIUM5", label: "₹5 OFF on 2 Premium Items", shortLabel: "2 PREMIUM ₹5 OFF", icon: "⭐", kind: "premium5", active: true },
-  { code: "LUCK", label: "Better Luck Next Time", shortLabel: "BETTER LUCK!", icon: "✨", kind: null, active: true },
-  { code: "TRIO5B", label: "Buy Any 3 Items & Get ₹5 OFF", shortLabel: "3 ITEMS ₹5 OFF", icon: "🍪", kind: "three5", active: true },
-  { code: "DROP60B", label: "FREE Delivery on ₹60+ Orders", shortLabel: "FREE DELIVERY ₹60+", icon: "🚚", kind: "free60", active: true },
-  { code: "SNACK100B", label: "Free ₹10 Snack on ₹100+ Orders", shortLabel: "FREE SNACK ₹100+", icon: "🎁", kind: "freeSnack100", active: true },
-];
-
 const orderLabel = (order: Order) => `#${String(order.orderNumber).padStart(4, "0")}`;
 /** Shelf sections the shopkeeper picks from (any other a product already has is kept). */
 const CATEGORIES = ["Snacks", "Chips", "Chocolates", "Biscuits", "Noodles", "Drinks", "Sweets", "Essentials"];
@@ -118,7 +104,7 @@ const emptyProfile: CustomerProfile = { fullName: "", phone: "", block: "A", roo
 /** embedded: inside /admin's console, which shows Order alerts and watches for new releases itself. */
 export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", embedded = false }: { user: User; initialMode?: "customer" | "history" | "admin"; signedOutTo?: "/" | "/admin"; embedded?: boolean }) {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"customer" | "history" | "admin">(initialMode);
+  const [mode, setMode] = useState<"customer" | "spin" | "history" | "admin">(initialMode);
   const [adminUnlocked, setAdminUnlocked] = useState(user.isShopkeeper);
   // The shopkeeper's page stays open for days (a Home Screen app never reloads): pick up new releases.
   useNewRelease(adminUnlocked && !embedded);
@@ -134,7 +120,6 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   const [store, setStore] = useState<StoreStatus | null>(null);
   const [coupon, setCoupon] = useState<Coupon | null>(null);
   const [spun, setSpun] = useState(false);
-  const [wheelOpen, setWheelOpen] = useState(false);
   const [firstOrder, setFirstOrder] = useState(user.firstOrderAvailable);
   const [receipt, setReceipt] = useState<Order | null>(null);
   // A UPI order that has been placed and is waiting for her to pay.
@@ -148,6 +133,8 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   const [dailyOffers, setDailyOffers] = useState<DailyOffer[]>([]);
   const [wheelRewards, setWheelRewards] = useState<WheelPrize[]>([]);
   const [couponRule, setCouponRule] = useState<CouponRule>("best");
+  // Spin & Win switched on for customers (the shopkeeper switches it at once, apart from Save).
+  const [wheelEnabled, setWheelEnabled] = useState(true);
   const [salesSummary, setSalesSummary] = useState<SalesSummary | null>(null);
   const [manualSales, setManualSales] = useState<ManualSale[]>([]);
   // Shop details the site admin sets (UPI, contacts, hours, options, prices).
@@ -155,8 +142,10 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   const newestOrderId = useRef<number | null>(null);
   // What the page has, as revisions: /sync sends back only what changed since.
   const revs = useRef<KnownRevs>(NO_REVS);
-  // Offer edits the shopkeeper hasn't saved yet; syncing never overwrites them.
+  // Offer edits the shopkeeper hasn't saved yet; syncing never overwrites them. (The ref for syncing, the
+  // state to show "not saved yet".)
   const promotionsDirty = useRef(false);
+  const [promotionsUnsaved, setPromotionsUnsaved] = useState(false);
   const ordersRef = useRef<Order[]>([]);
   ordersRef.current = orders;
   const payingRef = useRef<Order | null>(null);
@@ -167,10 +156,12 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
 
   const applyPromotions = useCallback((promotions: Promotions) => {
     promotionsDirty.current = false;
+    setPromotionsUnsaved(false);
     setLaunchMessage(promotions.launchMessage);
     setDailyOffers(promotions.dailyOffers);
     setWheelRewards(promotions.wheelPrizes);
     setCouponRule(promotions.couponRule);
+    setWheelEnabled(promotions.wheelEnabled ?? true);
   }, []);
 
   const loadAll = useCallback(async () => {
@@ -226,7 +217,11 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
     if (data.loyalty) setLoyalty(data.loyalty);
     if (data.promotions) {
       if (!promotionsDirty.current) applyPromotions(data.promotions);
-      else toast.info("Offers were changed on another device. Saving here will replace them.", { id: "offers-changed", duration: 8000 });
+      else {
+        // The on/off switch isn't part of Save, so it always follows.
+        setWheelEnabled(data.promotions.wheelEnabled ?? true);
+        toast.info("Offers were changed on another device. Saving here will replace them.", { id: "offers-changed", duration: 8000 });
+      }
     }
     if (data.orders) {
       const latest = data.orders;
@@ -379,7 +374,18 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
 
   /** A setter for an offers field that also marks the offers as edited but not saved. */
   function edited<T>(set: (value: T) => void) {
-    return (value: T) => { promotionsDirty.current = true; set(value); };
+    return (value: T) => { promotionsDirty.current = true; setPromotionsUnsaved(true); set(value); };
+  }
+
+  /** Spin & Win on or off for customers, saved at once. */
+  async function switchWheel(enabled: boolean) {
+    try {
+      const saved = await api.admin.switchWheel(enabled);
+      setWheelEnabled(saved.wheelEnabled ?? enabled);
+      toast.success(enabled ? "Spin & Win is on: customers can spin again." : "Spin & Win is off: customers don't see the wheel. Coupons already won still work.");
+    } catch (error) {
+      toast.error(errorText(error, "Could not switch the wheel."));
+    }
   }
 
   async function changeOverride(override: StoreOverride) {
@@ -435,6 +441,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       <nav aria-label="View selector" className="sticky top-0 z-30 border-b border-border bg-background/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto grid max-w-2xl grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-1 rounded-md border border-border bg-card p-1 shadow-sm">
           <Button variant={mode === "customer" ? "default" : "ghost"} className="h-auto min-h-9 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:px-4 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => { setMode("customer"); void navigate({ to: "/shop" }); }}><ShoppingBag /> Customer Shop</Button>
+          {(wheelEnabled || mode === "spin") && <Button variant={mode === "spin" ? "default" : "ghost"} className="h-auto min-h-9 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:px-4 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => setMode("spin")}><Sparkles /> Spin &amp; Win</Button>}
           <Button variant={mode === "history" ? "default" : "ghost"} className="h-auto min-h-9 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:px-4 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => setMode("history")}><History /> My Orders</Button>
           {adminUnlocked && <Button variant={mode === "admin" ? "default" : "ghost"} className="h-auto min-h-9 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:px-4 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={openDashboard}><LockKeyhole /> Shopkeeper</Button>}
         </div>
@@ -442,8 +449,10 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
 
       {mode === "customer" ? (
         <CustomerView loaded={loaded} products={products} cart={cart} updateCart={updateCart} wishes={wishes} wishInput={wishInput} setWishInput={setWishInput} submitWish={submitWish} wishMessage={wishMessage} coupon={coupon} firstOrder={loaded && firstOrder} launchMessage={launchMessage} dailyOffers={dailyOffers} loyalty={loyalty} />
+      ) : mode === "spin" ? (
+        <SpinPage enabled={wheelEnabled} prizes={wheelRewards.filter((prize) => prize.active)} spun={spun} coupon={coupon} onResult={finishSpin} onShop={() => { setMode("customer"); void navigate({ to: "/shop" }); }} />
       ) : mode === "history" ? <OrderHistory orders={orders} onOpen={setReceipt} onPay={setPaying} onEditProfile={() => setProfileOpen(true)} onOrderAgain={orderAgain} loyalty={loyalty} /> : adminUnlocked ? (
-        <AdminView products={products} setProducts={setProducts} wishes={wishes} {...(user.isAdmin ? { removeWish } : {})} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={() => { promotionsDirty.current = false; }} />
+        <AdminView products={products} setProducts={setProducts} wishes={wishes} {...(user.isAdmin ? { removeWish } : {})} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} wheelEnabled={wheelEnabled} switchWheel={switchWheel} promotionsUnsaved={promotionsUnsaved} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={applyPromotions} />
       ) : (
         <section className="mx-auto grid max-w-md gap-3 px-4 py-16 text-center">
           <h2 className="font-hand text-3xl font-bold">Shopkeeper dashboard</h2>
@@ -453,18 +462,11 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
         </section>
       )}
 
-      {mode === "customer" && (
-        <>
-          <Button onClick={() => setWheelOpen(true)} className="fixed bottom-24 right-4 z-40 h-12 rounded-full bg-accent px-4 text-accent-foreground shadow-[0_10px_28px_var(--shadow-color)] hover:bg-accent/90">
-            <Sparkles className="size-5" /> <span className="font-hand text-base font-bold">Spin &amp; Win! 🎡</span>
-          </Button>
-          <Button onClick={() => setCartOpen(true)} className="fixed bottom-4 left-1/2 z-40 h-14 -translate-x-1/2 rounded-full px-5 shadow-[0_10px_28px_var(--shadow-color)]">
-            <ShoppingBag className="size-5" /> <span>{itemCount} {itemCount === 1 ? "item" : "items"} · {money(subtotal)}</span><span className="rounded-full bg-accent px-3 py-1 text-accent-foreground">Checkout</span>
-          </Button>
-        </>
+      {(mode === "customer" || mode === "spin") && (
+        <Button onClick={() => setCartOpen(true)} className="fixed bottom-4 left-1/2 z-40 h-14 -translate-x-1/2 rounded-full px-5 shadow-[0_10px_28px_var(--shadow-color)]">
+          <ShoppingBag className="size-5" /> <span>{itemCount} {itemCount === 1 ? "item" : "items"} · {money(subtotal)}</span><span className="rounded-full bg-accent px-3 py-1 text-accent-foreground">Checkout</span>
+        </Button>
       )}
-
-      {wheelOpen && <SpinWheel prizes={wheelRewards.filter((prize) => prize.active)} spun={spun} coupon={coupon} onResult={finishSpin} onClose={() => setWheelOpen(false)} />}
 
       {cartOpen && (
         <Checkout
@@ -622,15 +624,68 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
 
 const wheelColors = ["var(--secondary)", "var(--accent)", "var(--banner)", "var(--stock)", "var(--product)"];
 
-function SpinWheel({ prizes, spun, coupon, onResult, onClose }: { prizes: WheelPrize[]; spun: boolean; coupon: Coupon | null; onResult: (result: SpinResult) => void; onClose: () => void }) {
+/** The wheel itself: one slice per prize (its icon and short text), turned by angle. */
+function WheelDisc({ prizes, angle = 0, spinning = false, className = "size-[min(88vw,24rem)]" }: { prizes: WheelPrize[]; angle?: number; spinning?: boolean; className?: string }) {
+  const slice = 360 / Math.max(1, prizes.length);
+  const gradient = `conic-gradient(${prizes.map((_, index) => `${wheelColors[index % wheelColors.length]} ${index * slice}deg ${(index + 1) * slice}deg`).join(", ")})`;
+  return (
+    <div className={`relative mx-auto ${className}`}>
+      <span aria-hidden="true" className="absolute left-1/2 top-[-12px] z-20 -translate-x-1/2 text-4xl text-primary drop-shadow-md">▼</span>
+      <div
+        className="relative size-full overflow-hidden rounded-full border-[6px] border-primary shadow-[0_0_22px_var(--secondary),5px_7px_0_var(--shadow-color)]"
+        style={{ transform: `rotate(${angle}deg)`, transition: spinning ? "transform 3.2s cubic-bezier(.17,.67,.2,1)" : undefined, background: prizes.length ? gradient : "var(--muted)" }}
+      >
+        {prizes.map((prize, index) => {
+          const radians = ((index * slice + slice / 2) * Math.PI) / 180;
+          return (
+            <div key={`${prize.code}-${index}`} className="absolute z-10 -translate-x-1/2 -translate-y-1/2" style={{ left: `${50 + Math.sin(radians) * 31}%`, top: `${50 - Math.cos(radians) * 31}%` }}>
+              <span className="flex h-[4.4rem] w-[4.4rem] flex-col items-center justify-center overflow-hidden px-0.5 text-center font-display text-[8px] font-extrabold leading-tight text-foreground drop-shadow-sm sm:h-[4.8rem] sm:w-[4.8rem] sm:text-[9px]"><span className="text-base leading-none">{prize.icon}</span>{prize.shortLabel || prize.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="pointer-events-none absolute inset-0 grid place-items-center"><span className="grid size-11 place-items-center rounded-full border-4 border-card bg-primary font-hand text-[10px] font-bold text-primary-foreground shadow-md">SPIN</span></div>
+    </div>
+  );
+}
+
+/** What her coupon's cart needs, in words ("items worth ₹80+ · Room Delivery"). */
+function couponNeeds(coupon: Coupon): string {
+  const needs = [
+    coupon.minOrder > 0 && `items worth ₹${coupon.minOrder}+`,
+    coupon.minItems > 0 && `${coupon.minItems}+ items`,
+    coupon.kind === "premium5" && `${PREMIUM_ITEMS} premium items (₹${PREMIUM_PRICE}+ each)`,
+    isDeliveryCoupon(coupon.kind) && "Room Delivery",
+  ].filter(Boolean);
+  return needs.length ? needs.join(" · ") : "any order";
+}
+
+/** Her coupon: what it gives, what the cart needs, and when it ends. */
+function CouponCard({ coupon }: { coupon: Coupon }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setTick((value) => value + 1), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const left = Math.max(0, coupon.expiresAt - Date.now());
+  return (
+    <section aria-label="Your coupon" className="mt-5 rounded-lg border-2 border-dashed border-stock bg-stock/25 p-4 text-left">
+      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Your coupon · {coupon.code}</p>
+      <p className="mt-1 font-hand text-2xl font-bold">{coupon.icon} {coupon.label}</p>
+      <p className="mt-1 text-sm">Needs: {couponNeeds(coupon)}. It applies by itself at checkout when your cart qualifies.</p>
+      <p className="mt-1 text-xs font-bold text-muted-foreground">Ends in {Math.floor(left / 3_600_000)}h {Math.floor((left % 3_600_000) / 60_000)}m</p>
+    </section>
+  );
+}
+
+/** Spin & Win, a page of its own: today's spin and her coupon. */
+function SpinPage({ enabled, prizes, spun, coupon, onResult, onShop }: { enabled: boolean; prizes: WheelPrize[]; spun: boolean; coupon: Coupon | null; onResult: (result: SpinResult) => void; onShop: () => void }) {
   const [angle, setAngle] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState<WheelPrize | undefined>(undefined);
   // The server's list wins once it has picked a prize, so the pointer lands on the right slice.
   const [serverWheel, setServerWheel] = useState<WheelPrize[] | null>(null);
-  const wheel = serverWheel ?? (prizes.length >= 2 ? prizes : defaultWheelPrizes);
-  const slice = 360 / wheel.length;
-  const wheelGradient = `conic-gradient(${wheel.map((_, index) => `${wheelColors[index % wheelColors.length]} ${index * slice}deg ${(index + 1) * slice}deg`).join(", ")})`;
+  const wheel = serverWheel ?? prizes;
 
   async function spin() {
     if (spinning || spun) return;
@@ -651,48 +706,33 @@ function SpinWheel({ prizes, spun, coupon, onResult, onClose }: { prizes: WheelP
     }
   }
 
+  const showWheel = enabled || spinning || result !== undefined;
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/60 p-4 backdrop-blur-sm" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-       <section className="w-full max-w-md overflow-hidden rounded-lg border-2 border-dashed border-primary/50 bg-card p-5 text-center shadow-[0_0_32px_color-mix(in_oklab,var(--accent)_55%,transparent),7px_8px_0_var(--shadow-color)]">
-        <div className="flex items-start justify-between">
-          <h2 className="font-hand text-3xl font-bold">Spin &amp; Win Midnight Discounts! 🎡</h2>
-          <Button size="icon" variant="ghost" onClick={onClose}><X /></Button>
-        </div>
-         <div className="relative mx-auto mt-4 size-[min(88vw,24rem)]">
-           <span className="absolute left-1/2 top-[-12px] z-20 -translate-x-1/2 text-4xl text-primary drop-shadow-md">▼</span>
-          <div
-              className="relative size-full overflow-hidden rounded-full border-[6px] border-primary shadow-[0_0_22px_var(--secondary),5px_7px_0_var(--shadow-color)]"
-            style={{
-              transform: `rotate(${angle}deg)`,
-              transition: spinning ? "transform 3.2s cubic-bezier(.17,.67,.2,1)" : undefined,
-              background: wheelGradient,
-            }}
-           >
-              {wheel.map((prize, index) => {
-                const middle = index * slice + slice / 2;
-                const radians = middle * Math.PI / 180;
-                return (
-                  <div key={`${prize.code}-${index}`} className="absolute z-10 -translate-x-1/2 -translate-y-1/2" style={{ left: `${50 + Math.sin(radians) * 29}%`, top: `${50 - Math.cos(radians) * 29}%` }}>
-                    <span className="flex h-[4.2rem] w-[4.25rem] items-center justify-center overflow-hidden px-0.5 text-center font-display text-[7px] font-extrabold leading-none text-foreground drop-shadow-sm sm:h-[4.8rem] sm:w-[4.8rem] sm:text-[8px]">{prize.icon}<br />{prize.label}</span>
-                  </div>
-                );
-              })}
-           </div>
-            <div className="pointer-events-none absolute inset-0 grid place-items-center"><span className="grid size-11 place-items-center rounded-full border-4 border-card bg-primary font-hand text-[10px] font-bold text-primary-foreground shadow-md">SPIN</span></div>
-        </div>
-        {result !== undefined && (
-          <p className="mt-4 font-hand text-xl font-bold text-primary">{result.kind ? `You won ${result.label}! It is saved and will apply when eligible.` : `${result.icon} ${result.label}`}</p>
+    <div className="mx-auto max-w-md px-4 py-8">
+      <section aria-labelledby="spin-title" className="overflow-hidden rounded-lg border-2 border-dashed border-primary/50 bg-card p-5 text-center shadow-[0_0_32px_color-mix(in_oklab,var(--accent)_55%,transparent),7px_8px_0_var(--shadow-color)]">
+        <p className="font-hand text-lg font-bold text-primary">One spin a day ♡</p>
+        <h2 id="spin-title" className="font-hand text-3xl font-bold">Spin &amp; Win Midnight Discounts! 🎡</h2>
+        {showWheel ? (
+          <>
+            <div className="mt-5"><WheelDisc prizes={wheel} angle={angle} spinning={spinning} /></div>
+            {result !== undefined && <p role="status" className="mt-4 font-hand text-xl font-bold text-primary">{result.kind ? `You won ${result.label}! 🎉 It's saved and applies at checkout when your cart qualifies.` : `${result.icon} ${result.label}`}</p>}
+            {result === undefined && !spinning && spun && <p className="mt-4 font-hand text-xl font-bold text-primary">{coupon ? "You spun today: your coupon is below." : "You spun today."}</p>}
+            <Button className="mt-4 h-12 w-full text-base" onClick={() => void spin()} disabled={spinning || spun || wheel.length < 2}>
+              {spinning ? "Spinning…" : spun ? "Come back tomorrow for another spin 💫" : "Spin today’s wheel!"}
+            </Button>
+          </>
+        ) : (
+          <p role="status" className="mt-4 text-sm font-semibold text-muted-foreground">The spin wheel is switched off right now. Check back later!{coupon ? " Your coupon below still works." : ""}</p>
         )}
-        {result === undefined && !spinning && spun && coupon && <p className="mt-4 font-hand text-xl font-bold text-primary">Your coupon {coupon.code} ({coupon.label}) is already saved.</p>}
-        <Button className="mt-4 h-12 w-full text-base" onClick={spin} disabled={spinning || spun}>
-           {spinning ? "Spinning…" : spun ? "Come back tomorrow for another spin 💫" : "Spin today’s wheel!"}
-        </Button>
       </section>
+      {coupon && <CouponCard coupon={coupon} />}
+      <p className="mt-4 text-xs text-muted-foreground">One coupon at a time: a new win replaces the old one. Coupons last 48 hours. Only the single best discount applies to a cart.</p>
+      <Button variant="outline" className="mt-4 w-full" onClick={onShop}><ShoppingBag /> Back to the shop</Button>
     </div>
   );
 }
 
-function AdminView({ products, setProducts, wishes, removeWish, orders, setOrders, override, setOverride, storeOnline, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, summary, manualSales, setManualSales, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; removeWish?: (name: string) => void; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; summary: SalesSummary | null; manualSales: ManualSale[]; setManualSales: React.Dispatch<React.SetStateAction<ManualSale[]>>; promotionsSaved: () => void }) {
+function AdminView({ products, setProducts, wishes, removeWish, orders, setOrders, override, setOverride, storeOnline, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, wheelEnabled, switchWheel, promotionsUnsaved, summary, manualSales, setManualSales, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; removeWish?: (name: string) => void; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; wheelEnabled: boolean; switchWheel: (enabled: boolean) => Promise<void>; promotionsUnsaved: boolean; summary: SalesSummary | null; manualSales: ManualSale[]; setManualSales: React.Dispatch<React.SetStateAction<ManualSale[]>>; promotionsSaved: (saved: Promotions) => void }) {
   const site = useSite();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -860,14 +900,15 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
     }
   }
 
+  // The offers and the wheel are saved together (one Save on each page), so neither undoes the other.
   async function savePromotions() {
     if (wheelRewards.filter((reward) => reward.active).length < 2) { toast.error("Keep at least two wheel slices active."); return; }
     if (!wheelRewards.some((reward) => reward.active && reward.kind === null)) { toast.error("Keep one Better Luck slice active."); return; }
     setSavingPromotions(true);
     try {
-      await api.admin.savePromotions({ launchMessage: launchMessage.trim(), dailyOffers, wheelPrizes: wheelRewards, couponRule });
-      promotionsSaved();
-      toast.success("Offers and spin wheel updated for customers.");
+      // The reply is what customers now see (the server writes each slice's text from its amounts).
+      promotionsSaved(await api.admin.savePromotions({ launchMessage: launchMessage.trim(), dailyOffers, wheelPrizes: wheelRewards, couponRule }));
+      toast.success(page === "wheel" ? "Spin wheel saved: customers see it now." : "Offers saved: customers see them now.");
     } catch (error) {
       toast.error(errorText(error, "Could not save the offers."));
     } finally {
@@ -882,15 +923,17 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
         <Button className="justify-self-start sm:justify-self-auto" onClick={() => (adding && page === "dashboard" ? setAdding(false) : openAddForm())}><PackagePlus /> {adding && page === "dashboard" ? "Close" : "Add item"}</Button>
       </div>
 
-      <div role="tablist" aria-label="Dashboard pages" className="mt-4 grid grid-cols-4 gap-1 rounded-md border border-border bg-card p-1">
+      <div role="tablist" aria-label="Dashboard pages" className="mt-4 grid grid-cols-5 gap-1 rounded-md border border-border bg-card p-1">
         {DASHBOARD_PAGES.map(({ id, label, icon: Icon }) => (
-          <Button key={id} role="tab" aria-selected={page === id} variant={page === id ? "default" : "ghost"} className="h-auto min-h-10 gap-1 whitespace-normal px-1 text-xs leading-tight sm:gap-2 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => setPage(id)}>
+          <Button key={id} role="tab" aria-selected={page === id} variant={page === id ? "default" : "ghost"} className="h-auto min-h-10 gap-1 whitespace-normal px-0.5 text-[0.7rem] leading-tight sm:gap-2 sm:px-1 sm:text-sm [&_svg]:hidden sm:[&_svg]:block" onClick={() => setPage(id)}>
             <Icon /> {label}{id === "restock" && lowStock.length > 0 && <span className="rounded-full bg-alert px-1.5 text-[0.7rem] font-bold leading-5 text-alert-foreground">{lowStock.length}</span>}
           </Button>
         ))}
       </div>
 
       {page === "restock" && <RestockPanel products={products} sold={summary?.sold ?? []} wishes={wishes} onEdit={openInventoryCard} />}
+
+      {page === "wheel" && <WheelEditor prizes={wheelRewards} setPrizes={setWheelRewards} couponRule={couponRule} setCouponRule={setCouponRule} enabled={wheelEnabled} switchWheel={switchWheel} unsaved={promotionsUnsaved} saving={savingPromotions} save={() => void savePromotions()} />}
 
       {page === "manual" && <ManualSalePanel products={products} sales={manualSales} onRecorded={manualSaleRecorded} onUndone={(sale) => setManualSales((current) => current.map((item) => (item.id === sale.id ? sale : item)))} />}
 
@@ -925,25 +968,15 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
       </section>
 
       <section className="mt-5 border-2 border-dashed border-primary/35 bg-card p-4 shadow-[4px_5px_0_var(--shadow-color)]">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-hand text-2xl font-bold">Offers &amp; Spin Wheel</h3><p className="text-sm text-muted-foreground">Only shopkeepers can edit what customers see.</p></div><Button onClick={savePromotions} disabled={savingPromotions}><Check /> {savingPromotions ? "Saving…" : "Save changes"}</Button></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-hand text-2xl font-bold">Offers of the Day</h3><p className="text-sm text-muted-foreground">Only shopkeepers can edit what customers see. The spin wheel has its own page.</p></div><Button onClick={savePromotions} disabled={savingPromotions}><Check /> {savingPromotions ? "Saving…" : "Save offers"}</Button></div>
+        {promotionsUnsaved && <p role="status" className="mt-3 rounded-md bg-accent px-3 py-2 text-sm font-bold text-accent-foreground">Not saved yet: customers still see the old offers. Tap Save offers.</p>}
         <label className="mt-4 grid gap-1 text-sm font-bold">Launching offer message<Input maxLength={200} value={launchMessage} onChange={(event) => setLaunchMessage(event.target.value)} /></label>
-        <label className="mt-4 grid gap-1 text-sm font-bold">When a spin coupon and an offer both apply
-          <select aria-label="Coupon rule" value={couponRule} onChange={(event) => setCouponRule(event.target.value as CouponRule)} className="h-10 w-full min-w-0 rounded-md border border-input bg-card px-2 font-normal">
-            <option value="best">Bigger saving wins</option>
-            <option value="coupon">Always use the spin coupon</option>
-          </select>
-          <span className="text-xs font-normal text-muted-foreground">{couponRule === "best" ? "If the offer saves more, the customer keeps her coupon for a later order." : "An eligible spin coupon is used even when an offer would save more."}</span>
-        </label>
         <h4 className="mt-5 font-hand text-xl font-bold">Daily offer cards</h4>
         <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
           {dailyOffers.map((offer, index) => <article key={offer.id} className="grid min-w-0 gap-2 rounded-md border border-border bg-background p-3"><div className="grid grid-cols-[4rem_1fr] gap-2"><Input aria-label={`${offer.id} icon`} maxLength={16} value={offer.icon} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, icon: event.target.value } : item))} /><Input aria-label={`${offer.id} title`} maxLength={80} value={offer.title} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, title: event.target.value } : item))} /></div><Input aria-label={`${offer.id} description`} maxLength={200} value={offer.note} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, note: event.target.value } : item))} /><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={offer.active} onChange={(event) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))} /> Show this offer</label><OfferAmounts offer={offer} change={(patch) => setDailyOffers((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))} /></article>)}
         </div>
         <p className="mt-2 text-xs text-muted-foreground">Customers read each card&apos;s text; checkout gives the amounts under it. Keep the two saying the same.</p>
-        <h4 className="mt-5 font-hand text-xl font-bold">Spin wheel slices</h4>
-        <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
-           {wheelRewards.map((reward, index) => <article key={`${reward.code}-${index}`} className="grid min-w-0 gap-2 rounded-md border border-border bg-background p-3"><div className="grid grid-cols-[4rem_1fr] gap-2"><Input aria-label={`${reward.code} icon`} maxLength={16} value={reward.icon} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, icon: event.target.value } : item))} /><Input aria-label={`${reward.code} offer text`} maxLength={80} value={reward.label} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value, shortLabel: event.target.value } : item))} /></div><select aria-label={`${reward.code} reward rule`} value={reward.kind ?? "luck"} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, kind: event.target.value === "luck" ? null : event.target.value as CouponKind } : item))} className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm"><option value="free60">Free delivery on ₹60+</option><option value="three5">₹5 off any 3 items</option><option value="freeSnack100">Free ₹10 snack on ₹100+</option><option value="halfDelivery">50% off room delivery</option><option value="four10">₹10 off any 4 items</option><option value="premium5">₹5 off 2 premium items</option><option value="luck">Better Luck Next Time</option></select><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" checked={reward.active} onChange={(event) => setWheelRewards((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))} /> Active slice</label></article>)}
-        </div>
-        <Button className="mt-4 w-full" onClick={savePromotions} disabled={savingPromotions}><Check /> {savingPromotions ? "Saving…" : "Save offers & wheel"}</Button>
+        <Button className="mt-4 w-full" onClick={savePromotions} disabled={savingPromotions}><Check /> {savingPromotions ? "Saving…" : "Save offers"}</Button>
       </section>
 
 
@@ -1181,10 +1214,130 @@ function RestockPanel({ products, sold, wishes, onEdit }: { products: Product[];
   );
 }
 
-type DashboardPage = "dashboard" | "restock" | "manual" | "summary";
+/** The reward a slice can give, as the shopkeeper picks it ("₹ off" is three5; four10 is the same). */
+const SLICE_REWARDS: { value: CouponKind | "luck"; label: string }[] = [
+  { value: "three5", label: "₹ OFF the order" },
+  { value: "free60", label: "FREE room delivery" },
+  { value: "halfDelivery", label: "50% OFF room delivery" },
+  { value: "freeSnack100", label: "A free snack" },
+  { value: "premium5", label: "₹ OFF on 2 premium items (₹45+)" },
+  { value: "luck", label: "Better Luck Next Time (no prize)" },
+];
+
+/** A slice with its text made from what it gives (the server does the same when it saves). */
+function withText(prize: WheelPrize): WheelPrize {
+  return { ...prize, ...prizeText(prizeTerms(prize)) };
+}
+
+/** A whole-number box: kept when leaving it; anything else goes back, with a message. */
+function WholeNumber({ label, ariaLabel, value, min, max, change }: { label: string; ariaLabel: string; value: number; min: number; max: number; change: (value: number) => void }) {
+  return (
+    <label className="grid gap-1 text-xs font-bold">
+      {label}
+      <Input
+        key={value}
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step="1"
+        aria-label={ariaLabel}
+        defaultValue={value}
+        onBlur={(event) => {
+          const n = Number(event.target.value);
+          if (!event.target.value.trim() || !Number.isInteger(n) || n < min || n > max) { event.target.value = String(value); toast.error(`${label}: enter a whole number from ${min} to ${max}.`); return; }
+          if (n !== value) change(n);
+        }}
+      />
+    </label>
+  );
+}
+
+/** The Spin wheel page of the dashboard: on/off for customers (at once), what each slice gives and the
+ * cart it needs (its text is made from those, so the wheel always says what checkout gives), a preview,
+ * and which wins when a coupon and an offer both apply. */
+function WheelEditor({ prizes, setPrizes, couponRule, setCouponRule, enabled, switchWheel, unsaved, saving, save }: { prizes: WheelPrize[]; setPrizes: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; enabled: boolean; switchWheel: (enabled: boolean) => Promise<void>; unsaved: boolean; saving: boolean; save: () => void }) {
+  const [switching, setSwitching] = useState(false);
+  const change = (index: number, patch: Partial<WheelPrize>) => setPrizes((current) => current.map((item, itemIndex) => (itemIndex === index ? withText({ ...item, ...patch }) : item)));
+  function pickReward(index: number, value: string) {
+    if (value === "luck") { change(index, { kind: null, minOrder: null, minItems: null, amount: null }); return; }
+    const kind = value as CouponKind;
+    change(index, { kind, ...COUPON_DEFAULTS[kind] });
+  }
+  async function flip() {
+    setSwitching(true);
+    try { await switchWheel(!enabled); } finally { setSwitching(false); }
+  }
+  const active = prizes.filter((prize) => prize.active);
+  const saveButton = (wide = false) => <Button className={wide ? "mt-4 w-full" : ""} onClick={save} disabled={saving}><Check /> {saving ? "Saving…" : "Save wheel"}</Button>;
+  return (
+    <div className="mt-5 grid gap-5">
+      <section aria-labelledby="wheel-switch-title" className={`border-2 border-dashed p-4 shadow-[4px_5px_0_var(--shadow-color)] ${enabled ? "border-primary/35 bg-card" : "border-alert bg-alert/15"}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2"><h3 id="wheel-switch-title" className="font-hand text-2xl font-bold">Spin &amp; Win for customers</h3><span className={`rounded-full px-2 py-0.5 text-xs font-bold ${enabled ? "bg-stock text-stock-foreground" : "bg-alert text-alert-foreground"}`}>{enabled ? "On" : "Off"}</span></div>
+            <p className="mt-1 text-sm text-muted-foreground">{enabled ? "Customers see the Spin & Win page and can spin once a day." : "Customers don't see the wheel and can't spin. Coupons they already won still work until they end (48 hours)."} This switch works at once (no Save needed).</p>
+          </div>
+          <Button variant={enabled ? "outline" : "default"} onClick={() => void flip()} disabled={switching}>{switching ? "Switching…" : enabled ? "Turn off Spin & Win" : "Turn on Spin & Win"}</Button>
+        </div>
+      </section>
+
+      <section aria-labelledby="wheel-slices-title" className="border-2 border-dashed border-primary/35 bg-card p-4 shadow-[4px_5px_0_var(--shadow-color)]">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 id="wheel-slices-title" className="font-hand text-2xl font-bold">Wheel slices</h3><p className="text-sm text-muted-foreground">Pick what each slice gives and what the cart needs. Its text on the wheel is written from those, so checkout always gives what the wheel says.</p></div>{saveButton()}</div>
+        {unsaved && <p role="status" className="mt-3 rounded-md bg-accent px-3 py-2 text-sm font-bold text-accent-foreground">Not saved yet: customers still see the old wheel. Tap Save wheel.</p>}
+        <div className="mt-4 grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {prizes.map((prize, index) => {
+              const name = `Slice ${index + 1}`;
+              const kind = prize.kind === "four10" ? "three5" : prize.kind;
+              const terms = prizeTerms(prize);
+              return (
+                <article key={`${prize.code}-${index}`} aria-label={name} className={`grid min-w-0 content-start gap-2 rounded-md border p-3 ${prize.active ? "border-border bg-background" : "border-dashed border-border bg-muted/40 opacity-75"}`}>
+                  <div className="flex items-center justify-between gap-2"><span className="text-xs font-bold text-muted-foreground">{name}</span><label className="flex items-center gap-2 text-sm font-bold"><input type="checkbox" aria-label={`${name} on the wheel`} checked={prize.active} onChange={(event) => change(index, { active: event.target.checked })} /> On the wheel</label></div>
+                  <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2">
+                    <Input aria-label={`${name} icon`} maxLength={16} value={prize.icon} onChange={(event) => change(index, { icon: event.target.value })} />
+                    <select aria-label={`${name} gives`} value={kind ?? "luck"} onChange={(event) => pickReward(index, event.target.value)} className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm">
+                      {SLICE_REWARDS.map((reward) => <option key={reward.value} value={reward.value}>{reward.label}</option>)}
+                    </select>
+                  </div>
+                  {terms && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {!isDeliveryCoupon(terms.kind) && <WholeNumber label={terms.kind === "freeSnack100" ? "Snack worth up to (₹)" : "₹ OFF"} ariaLabel={`${name} amount`} value={terms.amount} min={1} max={500} change={(amount) => change(index, { amount })} />}
+                      <WholeNumber label="Min. order (₹, 0 = any)" ariaLabel={`${name} minimum order`} value={terms.minOrder} min={0} max={5000} change={(minOrder) => change(index, { minOrder })} />
+                      <WholeNumber label="Min. items (0 = any)" ariaLabel={`${name} minimum items`} value={terms.minItems} min={0} max={50} change={(minItems) => change(index, { minItems })} />
+                    </div>
+                  )}
+                  <p className="rounded-md bg-card px-2 py-1 text-sm font-bold text-primary">Wheel says: {prize.icon} {prize.label}</p>
+                  {terms && !isDeliveryCoupon(terms.kind) && terms.minOrder > 0 && terms.amount >= terms.minOrder && <p className="text-xs font-bold text-destructive">This gives as much as the whole minimum order.</p>}
+                </article>
+              );
+            })}
+          </div>
+          <aside aria-label="Wheel preview" className="grid content-start justify-items-center gap-2 rounded-md border border-border bg-background p-3 text-center">
+            <p className="text-sm font-bold">Preview ({active.length} slices on)</p>
+            <WheelDisc prizes={active} className="size-64" />
+            <p className="text-xs text-muted-foreground">How customers will see it after you save.</p>
+          </aside>
+        </div>
+        <label className="mt-5 grid gap-1 text-sm font-bold">When a spin coupon and an offer both apply
+          <select aria-label="Coupon rule" value={couponRule} onChange={(event) => setCouponRule(event.target.value as CouponRule)} className="h-10 w-full min-w-0 rounded-md border border-input bg-card px-2 font-normal">
+            <option value="best">Bigger saving wins</option>
+            <option value="coupon">Always use the spin coupon</option>
+          </select>
+          <span className="text-xs font-normal text-muted-foreground">{couponRule === "best" ? "If the offer saves more, the customer keeps her coupon for a later order." : "An eligible spin coupon is used even when an offer would save more."}</span>
+        </label>
+        <p className="mt-3 text-xs text-muted-foreground">Keep at least two slices on, including one Better Luck slice. A coupon already won keeps the terms it was won with.</p>
+        {saveButton(true)}
+      </section>
+    </div>
+  );
+}
+
+type DashboardPage = "dashboard" | "restock" | "wheel" | "manual" | "summary";
 const DASHBOARD_PAGES: { id: DashboardPage; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "restock", label: "Restock", icon: AlertTriangle },
+  { id: "wheel", label: "Spin wheel", icon: Sparkles },
   { id: "manual", label: "Manual sale", icon: Receipt },
   { id: "summary", label: "Summary", icon: TrendingUp },
 ];
