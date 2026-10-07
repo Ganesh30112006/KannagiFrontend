@@ -64,10 +64,11 @@ export const OFFER_DEFAULTS = { firstPercent: 10, bulkPercent: 20, tier50Gift: 5
 /** A free chocolate as an order lists it (see gift_text in backend/app/services.py). */
 export const giftText = (rupees: number) => `₹${rupees} chocolate (free)`;
 
-/** Set by the site admin (whole rupees): added to each item's MRP (eggs: once per order), and the
- * room delivery fee. */
-export type PriceRules = { markup: number; deliveryFee: number };
-export const DEFAULT_RULES: PriceRules = { markup: 5, deliveryFee: 10 };
+/** Set by the site admin (whole rupees): the room delivery fee. (Each item's markup is on the item.) */
+export type PriceRules = { deliveryFee: number };
+export const DEFAULT_RULES: PriceRules = { deliveryFee: 10 };
+/** What an item's price is made from: its MRP and its own markup (whole rupees, set on its card). */
+export type Priced = Pick<Product, "name" | "mrp" | "markup">;
 
 /** Paise off for a coupon. The delivery coupons follow the delivery fee (paise): free60 is the whole fee,
  * halfDelivery half of it (see coupon_value in backend/app/services.py). */
@@ -92,24 +93,24 @@ export const percentOff = (subtotal: number, percent: number) => Math.floor((sub
 
 export const isEggProduct = (product: Pick<Product, "name">) => product.name.trim().toLowerCase() === "eggs";
 
-/** Price per item in rupees: MRP + markup, except eggs, which are MRP each (+ markup once per order). */
-export const salePrice = (product: Pick<Product, "name" | "mrp">, rules: PriceRules = DEFAULT_RULES) =>
-  isEggProduct(product) ? product.mrp : product.mrp + rules.markup;
+/** Price per item in rupees: MRP + its markup, except eggs, which are MRP each (+ their markup once per
+ * order). Mirrors sale_price in backend/app/services.py. */
+export const salePrice = (product: Priced) => (isEggProduct(product) ? product.mrp : product.mrp + product.markup);
 
 /** In paise. */
-export function lineTotal(product: Pick<Product, "name" | "mrp">, quantity: number, rules: PriceRules = DEFAULT_RULES): number {
-  if (isEggProduct(product)) return toPaise(product.mrp) * quantity + (quantity > 0 ? rules.markup * 100 : 0);
-  return (toPaise(product.mrp) + rules.markup * 100) * quantity;
+export function lineTotal(product: Priced, quantity: number): number {
+  if (isEggProduct(product)) return toPaise(product.mrp) * quantity + (quantity > 0 ? product.markup * 100 : 0);
+  return (toPaise(product.mrp) + product.markup * 100) * quantity;
 }
 
-export type CartLine = { product: Pick<Product, "name" | "mrp">; qty: number };
+export type CartLine = { product: Priced; qty: number };
 export type CartSummary = { subtotal: number; itemCount: number; premiumCount: number }; // subtotal in paise
 
-export function cartSummary(lines: CartLine[], rules: PriceRules = DEFAULT_RULES): CartSummary {
+export function cartSummary(lines: CartLine[]): CartSummary {
   return {
-    subtotal: lines.reduce((sum, line) => sum + lineTotal(line.product, line.qty, rules), 0),
+    subtotal: lines.reduce((sum, line) => sum + lineTotal(line.product, line.qty), 0),
     itemCount: lines.reduce((sum, line) => sum + line.qty, 0),
-    premiumCount: lines.reduce((sum, line) => sum + (toPaise(salePrice(line.product, rules)) >= PREMIUM_PRICE * 100 ? line.qty : 0), 0),
+    premiumCount: lines.reduce((sum, line) => sum + (toPaise(salePrice(line.product)) >= PREMIUM_PRICE * 100 ? line.qty : 0), 0),
   };
 }
 
@@ -160,7 +161,7 @@ export type QuoteInput = {
 /** Only one reward applies per order; the offers give the amounts the shop set on their cards. Mirrors
  * best_deal in backend/app/services.py. */
 export function quote({ lines, delivery, firstOrder, coupon, dailyOffers, couponRule, rules = DEFAULT_RULES, now = Date.now() }: QuoteInput): Quote {
-  const cart = cartSummary(lines, rules);
+  const cart = cartSummary(lines);
   const fee = delivery === "Room Delivery" ? rules.deliveryFee * 100 : 0;
   const offer = (id: DailyOffer["id"]) => dailyOffers.find((item) => item.id === id);
   const active = (id: DailyOffer["id"]) => Boolean(offer(id)?.active);

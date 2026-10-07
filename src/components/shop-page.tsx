@@ -276,7 +276,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   );
   const itemCount = cartItems.reduce((sum, item) => sum + item.qty, 0);
   const unpaid = orders.find((order) => needsPayment(order) && !order.fulfilled);
-  const subtotal = toRupees(cartSummary(cartItems.map((item) => ({ product: item, qty: item.qty })), priceRules(site)).subtotal);
+  const subtotal = toRupees(cartSummary(cartItems.map((item) => ({ product: item, qty: item.qty }))).subtotal);
 
   function openDashboard() {
     setMode("admin");
@@ -548,7 +548,7 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
 
       <div className="mb-5 flex items-end justify-between gap-4">
         <div><p className="font-hand text-lg font-bold text-primary">Pick your midnight fix</p><h2 className="font-hand text-4xl font-bold">Snack shelf</h2></div>
-        <span className="hidden rounded-full bg-secondary px-3 py-1 text-sm font-bold text-secondary-foreground sm:block">MRP + ₹{site.markup} · eggs charged once per bundle</span>
+        <span className="hidden rounded-full bg-secondary px-3 py-1 text-sm font-bold text-secondary-foreground sm:block">MRP + a small add-on, shown on each item · eggs: once per bundle</span>
       </div>
       {shelf.length > 0 && (
         <div className="mb-4 grid gap-2">
@@ -576,7 +576,7 @@ function CustomerView({ loaded, products, cart, updateCart, wishes, wishInput, s
               </span>
               {(product.popular || product.isNew) && <span className="absolute left-1 top-1 rounded-full bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground shadow-sm">{product.popular ? "🔥 Popular" : "✨ New"}</span>}
               <h3 className="mt-3 min-h-12 font-hand text-xl font-bold leading-tight">{product.name}</h3>
-              <div className="flex items-end justify-between gap-2"><div className="min-w-0 [overflow-wrap:anywhere]">{isEggProduct(product) ? <><p className="text-lg font-bold text-primary">{money(product.mrp)} / egg</p><p className="text-[11px] text-muted-foreground">Quantity total + ₹{site.markup} once</p></> : <><p className="text-lg font-bold text-primary">{money(product.mrp + site.markup)}</p><p className="text-[11px] text-muted-foreground">MRP {money(product.mrp)} + ₹{site.markup}</p></>}</div></div>
+              <div className="flex items-end justify-between gap-2"><div className="min-w-0 [overflow-wrap:anywhere]">{isEggProduct(product) ? <><p className="text-lg font-bold text-primary">{money(product.mrp)} / egg</p><p className="text-[11px] text-muted-foreground">Quantity total + ₹{product.markup} once</p></> : <><p className="text-lg font-bold text-primary">{money(product.mrp + product.markup)}</p><p className="text-[11px] text-muted-foreground">MRP {money(product.mrp)} + ₹{product.markup}</p></>}</div></div>
               <div className="mt-3 grid grid-cols-[2rem_1fr_2rem] items-center rounded-md border border-border bg-background p-1">
                 <Button size="icon" variant="ghost" aria-label={`Remove ${product.name}`} onClick={() => updateCart(product.id, -1)} disabled={!qty}><Minus /></Button>
                 <span className="text-center font-bold">{qty}</span>
@@ -738,6 +738,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
   const [newName, setNewName] = useState("");
   const [newStock, setNewStock] = useState("5");
   const [newPrice, setNewPrice] = useState("20");
+  const [newMarkup, setNewMarkup] = useState("5");
   const [newImage, setNewImage] = useState<string | undefined>();
   const [newCategory, setNewCategory] = useState("Snacks");
   const addFormRef = useRef<HTMLFormElement>(null);
@@ -765,7 +766,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
   const productQueues = useRef(new Map<number, Promise<void>>());
   // Stock/threshold taps still waiting for the server, per product.
   const pendingTaps = useRef(new Map<number, number>());
-  function updateProduct(id: number, changes: { stock?: number; stockDelta?: number; threshold?: number; mrp?: number; category?: string; image?: string | null }) {
+  function updateProduct(id: number, changes: { stock?: number; stockDelta?: number; threshold?: number; mrp?: number; markup?: number; category?: string; image?: string | null }) {
     const run = async () => {
       try {
         const updated = await api.admin.updateProduct(id, changes);
@@ -806,6 +807,13 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
     if (mrp !== item.mrp) void updateProduct(item.id, { mrp });
   }
 
+  /** The item's price hike: whole rupees, 0 to 1000 (anything else goes back). */
+  function changeMarkup(item: Product, input: HTMLInputElement) {
+    const markup = parseMarkup(input.value);
+    if (markup === null) { input.value = String(item.markup); toast.error(`Price hike for ${item.name}: enter whole rupees from 0 to 1000.`); return; }
+    if (markup !== item.markup) void updateProduct(item.id, { markup });
+  }
+
   function openAddForm(name?: string) {
     setPage("dashboard");
     setAdding(true);
@@ -830,12 +838,14 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
     const image = newImage;
     const mrp = parsePrice(newPrice);
     const stock = Number(newStock);
+    const markup = parseMarkup(newMarkup);
     if (mrp === null) { toast.error("Enter a purchase price above ₹0."); return; }
+    if (markup === null) { toast.error("Price hike: enter whole rupees from 0 to 1000."); return; }
     if (!Number.isInteger(stock) || stock < 0) { toast.error("Starting stock must be a whole number (0 or more)."); return; }
     try {
-      const created = await api.admin.createProduct({ name: newName.trim(), mrp, stock, category: newCategory, ...(image ? { image } : {}) });
+      const created = await api.admin.createProduct({ name: newName.trim(), mrp, markup, stock, category: newCategory, ...(image ? { image } : {}) });
       setProducts((current) => [...current, created]);
-      setNewName(""); setNewStock("5"); setNewPrice("20"); setNewImage(undefined); setNewCategory("Snacks"); setAdding(false);
+      setNewName(""); setNewStock("5"); setNewPrice("20"); setNewMarkup("5"); setNewImage(undefined); setNewCategory("Snacks"); setAdding(false);
       toast.success(`${created.name} added to the shop.`);
     } catch (error) {
       toast.error(errorText(error, "Could not add the product."));
@@ -944,12 +954,13 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
           <div className="grid content-start gap-3">
             <h3 className="font-hand text-2xl font-bold">Add a new item</h3>
             <label className="grid gap-1 text-xs font-bold">Item name<Input required maxLength={80} placeholder="e.g. Oreo biscuits" value={newName} onChange={(e) => setNewName(e.target.value)} /></label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <label className="grid gap-1 text-xs font-bold">MRP (₹)<Input required type="number" inputMode="decimal" min="0.01" max="100000" step="0.01" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} aria-label="Purchase price" /></label>
+              <label className="grid gap-1 text-xs font-bold">Price hike (₹)<Input required type="number" inputMode="numeric" min="0" max="1000" step="1" value={newMarkup} onChange={(e) => setNewMarkup(e.target.value)} aria-label="New item's price hike" /></label>
               <label className="grid gap-1 text-xs font-bold">Starting stock<Input required type="number" inputMode="numeric" min="0" max="100000" step="1" value={newStock} onChange={(e) => setNewStock(e.target.value)} aria-label="Starting stock" /></label>
             </div>
             <label className="grid gap-1 text-xs font-bold">Shelf section<select aria-label="New item's shelf section" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm font-normal">{categoryOptions(newCategory).map((name) => <option key={name}>{name}</option>)}</select></label>
-            <p className="text-xs text-muted-foreground">Customers pay MRP + ₹{site.markup}. Add a real photo so customers recognise the item; you can also add or change it later.</p>
+            <p className="text-xs text-muted-foreground">Customers pay MRP + the price hike{parsePrice(newPrice) !== null && parseMarkup(newMarkup) !== null ? ` (${money((parsePrice(newPrice) ?? 0) + (parseMarkup(newMarkup) ?? 0))})` : ""}. Add a real photo so customers recognise the item; you can also add or change it later.</p>
             <Button type="submit" className="h-11"><PackagePlus /> Add item</Button>
           </div>
         </form>
@@ -998,9 +1009,9 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
               <article key={item.id} id={`inventory-${item.id}`} className="min-w-0 scroll-mt-24 border-2 border-foreground/10 bg-card p-4 shadow-[3px_4px_0_var(--shadow-color)]">
                 <PhotoPicker label={item.name} emoji={item.emoji} image={item.image} onPick={(image) => updateProduct(item.id, { image })} onRemove={() => updateProduct(item.id, { image: null })} compact />
                 <div className="mt-3 min-w-0">
-                  <div className="min-w-0"><h4 className="truncate font-hand text-xl font-bold">{item.name}</h4><p className="text-xs text-muted-foreground">{isEggProduct(item) ? `${money(item.mrp)} per egg + ₹${site.markup} per bundle` : `MRP ${money(item.mrp)} + ₹${site.markup}`}</p></div>
+                  <div className="min-w-0"><h4 className="truncate font-hand text-xl font-bold">{item.name}</h4><p className="text-xs text-muted-foreground">{isEggProduct(item) ? `${money(item.mrp)} per egg + ₹${item.markup} per bundle` : `Customers pay ${money(item.mrp + item.markup)} (MRP ${money(item.mrp)} + ₹${item.markup})`}</p></div>
                 </div>
-                <label className="mt-3 grid gap-1 text-xs font-bold">Purchase / MRP price<Input key={item.mrp} type="number" min="0" step="0.01" defaultValue={item.mrp} onBlur={(event) => changePrice(item, event.target)} /></label>
+                <div className="mt-3 grid grid-cols-2 gap-2"><label className="grid gap-1 text-xs font-bold">Purchase / MRP price<Input key={item.mrp} type="number" min="0" step="0.01" defaultValue={item.mrp} onBlur={(event) => changePrice(item, event.target)} /></label><label className="grid gap-1 text-xs font-bold">Price hike (₹)<Input key={item.markup} type="number" inputMode="numeric" min="0" max="1000" step="1" aria-label={`${item.name} price hike`} defaultValue={item.markup} onBlur={(event) => changeMarkup(item, event.target)} /></label></div>
                 <Counter label="Current stock" value={item.stock} minus={() => changeProduct(item.id,"stock",-1)} plus={() => changeProduct(item.id,"stock",1)} set={(value) => changeProduct(item.id, "stock", value - item.stock)} />
                 <Counter label="Restock threshold" value={item.threshold} minus={() => changeProduct(item.id,"threshold",-1)} plus={() => changeProduct(item.id,"threshold",1)} set={(value) => changeProduct(item.id, "threshold", value - item.threshold)} />
                 <label className="mt-3 grid gap-1 text-xs font-bold">Shelf section<select aria-label={`${item.name} shelf section`} value={item.category} onChange={(e) => { const category = e.target.value; setProducts((current) => current.map((product) => (product.id === item.id ? { ...product, category } : product))); void updateProduct(item.id, { category }); }} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm font-normal">{categoryOptions(item.category).map((name) => <option key={name}>{name}</option>)}</select></label>
@@ -1452,6 +1463,12 @@ function parsePrice(value: string): number | null {
   return value.trim() && Number.isFinite(price) && price > 0 && price <= 100_000 ? Math.round(price * 100) / 100 : null;
 }
 
+/** An item's price hike typed by the shopkeeper: whole rupees from 0 to 1000, or null. */
+function parseMarkup(value: string): number | null {
+  const markup = Number(value);
+  return value.trim() && Number.isInteger(markup) && markup >= 0 && markup <= 1000 ? markup : null;
+}
+
 // Shrink photos to a small JPEG before upload: quicker on hostel Wi-Fi, and the product list stays light.
 // (An animated GIF becomes a still photo.)
 function shrinkPhoto(file: File): Promise<string> {
@@ -1687,9 +1704,9 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
   const lines = useMemo(() => cartItems.map((item) => ({ product: item, qty: item.qty })), [cartItems]);
   const priced = useMemo(
     () => quote({ lines, delivery, firstOrder, coupon, dailyOffers, couponRule, rules }),
-    // rules is rebuilt each render; its two numbers are what matter.
+    // rules is rebuilt each render; its delivery fee is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [coupon, couponRule, dailyOffers, delivery, firstOrder, lines, rules.markup, rules.deliveryFee],
+    [coupon, couponRule, dailyOffers, delivery, firstOrder, lines, rules.deliveryFee],
   );
   const best = priced.deal;
   const subtotal = toRupees(priced.subtotal);
@@ -1698,7 +1715,7 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
   // Items she could take free: cheap enough, and still in stock after her own cart.
   const pickUpTo = best?.pickUpTo ?? FREE_PICK_MAX_PRICE;
   const freeChoices = products.filter((item) => item.mrp <= pickUpTo && item.stock - (cartItems.find((line) => line.id === item.id)?.qty ?? 0) > 0);
-  const couponCheck = couponStatus(coupon, cartSummary(lines, rules), delivery);
+  const couponCheck = couponStatus(coupon, cartSummary(lines), delivery);
   const couponApplied = best?.kind === "coupon";
 
   useEffect(() => {
@@ -1753,7 +1770,7 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
             {!storeOnline && <p className="mt-4 rounded-md bg-accent p-3 text-sm font-semibold text-accent-foreground">🌙 Store is offline right now — your order goes through as an <b>on-request</b> order and the shopkeeper will confirm it.</p>}
 
             <div className="mt-5 space-y-2">
-              {cartItems.map(item => <div key={item.id} className="flex items-center justify-between border-b border-border py-2"><span className="flex items-center gap-2">{item.image ? <img src={item.image} alt="" className="size-8 rounded object-cover" /> : <span aria-hidden="true">{item.emoji}</span>}<span><b>{item.name}</b> × {item.qty}</span></span><span>{money(toRupees(lineTotal(item, item.qty, rules)))}</span></div>)}
+              {cartItems.map(item => <div key={item.id} className="flex items-center justify-between border-b border-border py-2"><span className="flex items-center gap-2">{item.image ? <img src={item.image} alt="" className="size-8 rounded object-cover" /> : <span aria-hidden="true">{item.emoji}</span>}<span><b>{item.name}</b> × {item.qty}</span></span><span>{money(toRupees(lineTotal(item, item.qty)))}</span></div>)}
             </div>
 
             {coupon && <div className={`mt-4 rounded-md border-2 border-dashed p-3 text-sm font-bold ${couponApplied ? "border-stock bg-stock text-stock-foreground" : "border-primary/30 bg-banner text-foreground"}`}><p>{coupon.icon} {coupon.label}</p><p className="mt-1 text-xs font-semibold">{couponCheck.eligible && !couponApplied ? `Saved for later: ${best?.label ?? "another offer"} saves you more on this order.` : couponCheck.reason}</p>{!couponCheck.eligible && <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => toast.info(couponCheck.reason)}>Check coupon</Button>}</div>}

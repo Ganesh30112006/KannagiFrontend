@@ -20,16 +20,12 @@ export const DEFAULT_SITE: SiteDetails = {
   pickupEnabled: true,
   roomDeliveryEnabled: true,
   deliveryFee: 10,
-  markup: 5,
 };
 
 export const SiteContext = createContext<SiteDetails>(DEFAULT_SITE);
 export const useSite = () => useContext(SiteContext);
 
-export const priceRules = (site: SiteDetails): PriceRules => ({
-  markup: site.markup,
-  deliveryFee: site.deliveryFee,
-});
+export const priceRules = (site: SiteDetails): PriceRules => ({ deliveryFee: site.deliveryFee });
 
 /** 23 -> "11:00 PM". */
 export function hourLabel(hour: number): string {

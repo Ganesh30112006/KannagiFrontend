@@ -3,6 +3,8 @@ export type Product = {
   name: string;
   emoji: string;
   mrp: number;
+  /** Rupees added to the MRP for customers (eggs: once per order); set on the item's card. */
+  markup: number;
   stock: number;
   threshold: number;
   category: string;
@@ -248,7 +250,8 @@ export type ManualSaleInput = {
 export type Result<T> = { ok: true; data: T } | { ok: false; status: number; message: string };
 
 /** Shop details the site admin sets at /admin; every page uses them. Phones are 10 digits, hours
- * 0–23 (the automatic store status is online from openHour until closeHour), fee and markup rupees. */
+ * 0–23 (the automatic store status is online from openHour until closeHour), the fee in rupees. Each
+ * item's markup is on the item (Product.markup). */
 export type SiteDetails = {
   upiId: string;
   upiName: string;
@@ -264,7 +267,6 @@ export type SiteDetails = {
   pickupEnabled: boolean;
   roomDeliveryEnabled: boolean;
   deliveryFee: number;
-  markup: number;
 };
 
 /** Everything the site admin sets on the Shop details tab. */

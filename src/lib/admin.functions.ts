@@ -74,7 +74,6 @@ const siteSettings = z.object({
   pickupEnabled: z.boolean(),
   roomDeliveryEnabled: z.boolean(),
   deliveryFee: z.number().int().min(0).max(100),
-  markup: z.number().int().min(0).max(100),
   signupsOpen: z.boolean(),
 });
 const userId = z.object({ userId: z.string().min(1).max(36) });

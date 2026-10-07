@@ -340,13 +340,13 @@ function OverviewTab({ open }: { open: (tab: Tab, role?: AdminUserRole) => void 
       <Section title="Where things are">
         <ul className="grid gap-2 text-sm sm:grid-cols-2">
           <li>
-            <b>Shop &amp; dashboard:</b> products, photos, stock, prices, offers, spin wheel, store
+            <b>Shop &amp; dashboard:</b> products, photos, stock, prices and price hikes, offers, spin wheel, store
             open/closed and orders; Manual sale (sales made in person) and Summary (online, manual
             and total sales and profit). Also shows the shop as customers see it.
           </li>
           <li>
             <b>Shop details:</b> UPI ID and QR, payee name, phone numbers, pickup point, hours,
-            payment and delivery options, delivery fee, markup, new sign-ups.
+            payment and delivery options, delivery fee, new sign-ups.
           </li>
           <li>
             <b>People:</b> customers, shopkeepers and admins: set a new password, block, sign out,
@@ -685,8 +685,8 @@ function DetailsTab() {
       </Section>
 
       <Section
-        title="Delivery & prices"
-        note="Changing a price rule changes what customers pay from the next order on; carts update by themselves."
+        title="Delivery"
+        note="Changing the delivery fee changes what customers pay from the next order on; carts update by themselves. Each item's price hike is set on its card in the shop dashboard."
       >
         <div className="grid gap-3 sm:grid-cols-2">
           {toggle("pickupEnabled", "Offer Pickup")}
@@ -708,24 +708,6 @@ function DetailsTab() {
               }
             />,
             "The FREE Delivery and 50% OFF Delivery coupons follow this.",
-          )}
-          {field(
-            "Markup per item (₹)",
-            <Input
-              aria-label="Markup per item"
-              type="number"
-              min={0}
-              max={100}
-              step={1}
-              value={draft.markup}
-              onChange={(event) =>
-                set(
-                  "markup",
-                  Math.max(0, Math.min(100, Math.round(Number(event.target.value) || 0))),
-                )
-              }
-            />,
-            "Customers pay MRP + this (eggs: once per order).",
           )}
         </div>
       </Section>

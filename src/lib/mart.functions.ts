@@ -216,7 +216,7 @@ export const removeWish = createServerFn({ method: "POST" })
   .handler(async ({ data }) => (await server()).callBackend<null>("/site-admin/wishes/remove", "POST", { name: data.name }));
 
 export const createProduct = createServerFn({ method: "POST" })
-  .validator((data: unknown) => z.object({ name: text(80), mrp: z.number().positive().max(100_000), stock: z.number().int().min(0).max(100_000), category: text(40).optional(), image: image.optional() }).parse(data))
+  .validator((data: unknown) => z.object({ name: text(80), mrp: z.number().positive().max(100_000), markup: z.number().int().min(0).max(1000).optional(), stock: z.number().int().min(0).max(100_000), category: text(40).optional(), image: image.optional() }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<Product>("/admin/products", "POST", data));
 
 export const updateProduct = createServerFn({ method: "POST" })
@@ -228,6 +228,7 @@ export const updateProduct = createServerFn({ method: "POST" })
           stockDelta: z.number().int().min(-100_000).max(100_000).optional(),
           threshold: z.number().int().min(0).max(100_000).optional(),
           mrp: z.number().positive().max(100_000).optional(),
+          markup: z.number().int().min(0).max(1000).optional(),
           category: text(40).optional(),
           image: image.nullable().optional(),
         }),

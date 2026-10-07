@@ -9,7 +9,6 @@ import { api } from "@/lib/api";
 import type { ManualPayment, ManualSale, Product, SalesFigures, SalesSummary } from "@/lib/mart-types";
 import { formatMobile } from "@/lib/phone";
 import { cartSummary, isEggProduct, lineTotal, money, salePrice, toPaise, toRupees } from "@/lib/pricing";
-import { priceRules, useSite } from "@/lib/site";
 
 const errorText = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -54,8 +53,6 @@ function QtyStepper({ label, value, max, onChange }: { label: string; value: num
 /** Enter a sale made in person (at the shop's room, outside the website): its items come off the stock and it
  * counts in the Summary. Below it, the latest manual sales, each of which can be undone. */
 export function ManualSalePanel({ products, sales, onRecorded, onUndone }: { products: Product[]; sales: ManualSale[]; onRecorded: (sale: ManualSale, taken: Record<number, number>) => void; onUndone: (sale: ManualSale) => void }) {
-  const site = useSite();
-  const rules = priceRules(site);
   const [qty, setQty] = useState<Record<number, number>>({});
   const [search, setSearch] = useState("");
   const [amount, setAmount] = useState<string | null>(null); // null (or empty): the shop's prices
@@ -65,7 +62,7 @@ export function ManualSalePanel({ products, sales, onRecorded, onUndone }: { pro
   const [undoing, setUndoing] = useState<number | null>(null);
 
   const lines = products.filter((product) => (qty[product.id] ?? 0) > 0).map((product) => ({ product, qty: qty[product.id] ?? 0 }));
-  const shopTotal = toRupees(cartSummary(lines, rules).subtotal);
+  const shopTotal = toRupees(cartSummary(lines).subtotal);
   const itemCount = lines.reduce((sum, line) => sum + line.qty, 0);
   const typedAmount = amount !== null && amount.trim() !== "";
   const received = typedAmount ? parseAmount(amount) : shopTotal;
@@ -142,7 +139,7 @@ export function ManualSalePanel({ products, sales, onRecorded, onUndone }: { pro
             <li key={product.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 p-2">
               <div className="min-w-0">
                 <p className="font-bold leading-tight [overflow-wrap:anywhere]">{product.emoji} {product.name}</p>
-                <p className="text-xs text-muted-foreground">{money(salePrice(product, rules))}{isEggProduct(product) ? ` each + ₹${rules.markup} per bundle` : ""} · {product.stock ? `${product.stock} in stock` : "Out of stock"}</p>
+                <p className="text-xs text-muted-foreground">{money(salePrice(product))}{isEggProduct(product) ? ` each + ₹${product.markup} per bundle` : ""} · {product.stock ? `${product.stock} in stock` : "Out of stock"}</p>
               </div>
               <QtyStepper label={product.name} value={qty[product.id] ?? 0} max={product.stock} onChange={(update) => setCount(product, update)} />
             </li>
@@ -155,7 +152,7 @@ export function ManualSalePanel({ products, sales, onRecorded, onUndone }: { pro
           ) : (
             <ul className="space-y-1">
               {lines.map((line) => (
-                <li key={line.product.id} className="flex justify-between gap-2"><span className="min-w-0 truncate">{line.product.name} ×{line.qty}</span><span>{money(toRupees(lineTotal(line.product, line.qty, rules)))}</span></li>
+                <li key={line.product.id} className="flex justify-between gap-2"><span className="min-w-0 truncate">{line.product.name} ×{line.qty}</span><span>{money(toRupees(lineTotal(line.product, line.qty)))}</span></li>
               ))}
             </ul>
           )}
