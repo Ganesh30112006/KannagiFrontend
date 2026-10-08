@@ -828,7 +828,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
   const productQueues = useRef(new Map<number, Promise<void>>());
   // Stock/threshold taps still waiting for the server, per product.
   const pendingTaps = useRef(new Map<number, number>());
-  function updateProduct(id: number, changes: { stock?: number; stockDelta?: number; threshold?: number; mrp?: number; markup?: number; category?: string; image?: string | null }) {
+  function updateProduct(id: number, changes: { stock?: number; stockDelta?: number; shelf?: number; threshold?: number; mrp?: number; markup?: number; category?: string; image?: string | null }) {
     const run = async () => {
       try {
         const updated = await api.admin.updateProduct(id, changes);
@@ -890,7 +890,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
     window.setTimeout(() => {
       const card = document.getElementById(`inventory-${id}`);
       card?.scrollIntoView({ behavior: "smooth", block: "center" });
-      card?.querySelector<HTMLInputElement>('input[aria-label="Current stock"]')?.focus({ preventScroll: true });
+      card?.querySelector<HTMLInputElement>('input[aria-label="On the shelf"]')?.focus({ preventScroll: true });
     }, 50);
   }
 
@@ -967,6 +967,20 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
       if (fulfilled) toast.success(`Order ${orderLabel(order)} marked as fulfilled.`, { action: { label: "Undo", onClick: () => void setFulfilled(updated, false) } });
     } catch (error) {
       toast.error(errorText(error, "Could not update the order."));
+    } finally {
+      setUpdatingOrder(null);
+    }
+  }
+
+  /** The item the shop gave for an order's free chocolate or snack: off the stock (null: none from stock). */
+  async function giveGift(order: AdminOrder, index: number, productId: number | null) {
+    setUpdatingOrder(order.id);
+    try {
+      const updated = await api.admin.giveGift(order.id, index, productId);
+      setOrders((current) => current.map((item) => (item.id === order.id ? updated : item)));
+      setProducts(await api.products());
+    } catch (error) {
+      toast.error(errorText(error, "Could not record the free item."));
     } finally {
       setUpdatingOrder(null);
     }
@@ -1080,7 +1094,9 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
                   <div className="min-w-0"><h4 className="truncate font-hand text-xl font-bold">{item.name}</h4><p className="text-xs text-muted-foreground">{isEggProduct(item) ? `${money(item.mrp)} per egg + ₹${item.markup} per bundle` : `Customers pay ${money(item.mrp + item.markup)} (MRP ${money(item.mrp)} + ₹${item.markup})`}</p></div>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2"><label className="grid gap-1 text-xs font-bold">Purchase / MRP price<Input key={item.mrp} type="number" min="0" step="0.01" defaultValue={item.mrp} onBlur={(event) => changePrice(item, event.target)} /></label><label className="grid gap-1 text-xs font-bold">Price hike (₹)<Input key={item.markup} type="number" inputMode="numeric" min="0" max="1000" step="1" aria-label={`${item.name} price hike`} defaultValue={item.markup} onBlur={(event) => changeMarkup(item, event.target)} /></label></div>
-                <Counter label="Current stock" value={item.stock} minus={() => changeProduct(item.id,"stock",-1)} plus={() => changeProduct(item.id,"stock",1)} set={(value) => changeProduct(item.id, "stock", value - item.stock)} />
+                {/* The shelf: what's left to order plus what open orders hold (still there until handed over). A typed number is a shelf count; the server keeps open orders taken off. */}
+                <Counter label="On the shelf" value={item.stock + (item.held ?? 0)} minus={() => changeProduct(item.id,"stock",-1)} plus={() => changeProduct(item.id,"stock",1)} set={(value) => void updateProduct(item.id, { shelf: value })} />
+                {(item.held ?? 0) > 0 && <p className="mt-1 text-xs text-muted-foreground">{item.held} of them for orders not handed over yet · {item.stock} left for customers to order</p>}
                 <Counter label="Restock threshold" value={item.threshold} minus={() => changeProduct(item.id,"threshold",-1)} plus={() => changeProduct(item.id,"threshold",1)} set={(value) => changeProduct(item.id, "threshold", value - item.threshold)} />
                 <label className="mt-3 grid gap-1 text-xs font-bold">Shelf section<select aria-label={`${item.name} shelf section`} value={item.category} onChange={(e) => { const category = e.target.value; setProducts((current) => current.map((product) => (product.id === item.id ? { ...product, category } : product))); void updateProduct(item.id, { category }); }} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm font-normal">{categoryOptions(item.category).map((name) => <option key={name}>{name}</option>)}</select></label>
                  <Button variant="destructive" className="mt-3 w-full" onClick={() => void deleteProduct(item)}><Trash2 /> Delete item</Button>
@@ -1110,7 +1126,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
             <label className="relative mt-2 block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" className="pl-9" placeholder="Name, mobile, room or order #" aria-label="Search orders" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} /></label>
             <div className="mt-4 space-y-3">
               {shownOrders.length === 0 && <p className="border-2 border-dashed border-border bg-card p-6 text-center text-muted-foreground">{orders.length === 0 ? "No orders yet." : orderSearch.trim() ? "No orders match your search." : orderFilter === "pending" ? "All caught up: no pending orders. 🎉" : "No orders here yet."}</p>}
-              {shownOrders.map((order) => <OrderCard key={order.id} order={order} busy={updatingOrder === order.id} setFulfilled={(fulfilled, paymentReceived) => void setFulfilled(order, fulfilled, paymentReceived)} setPaymentReceived={(received) => void setPaymentReceived(order, received)} />)}
+              {shownOrders.map((order) => <OrderCard key={order.id} order={order} busy={updatingOrder === order.id} setFulfilled={(fulfilled, paymentReceived) => void setFulfilled(order, fulfilled, paymentReceived)} setPaymentReceived={(received) => void setPaymentReceived(order, received)} products={products} giveGift={(index, productId) => void giveGift(order, index, productId)} />)}
             </div>
           </section>
         </aside>
@@ -1501,7 +1517,35 @@ function RequestCard({ request, done }: { request: OrderRequest; done: () => voi
   );
 }
 
-export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cancel }: { order: AdminOrder; busy: boolean; setFulfilled: (fulfilled: boolean, paymentReceived?: boolean) => void; setPaymentReceived: (received: boolean) => void; cancel?: () => void }) {
+// An order's free chocolate or snack: before the shop says which item it gave ("₹5 chocolate (free)",
+// "₹10 free snack"), and after ("5 Star Mini (free ₹5 chocolate)"). See backend services.GIFT / GIVEN.
+const GIFT_TEXT = /^₹(\d+(?:\.\d+)?) (?:chocolate \(free\)|free snack)$/;
+const GIVEN_TEXT = /^(.+) \(free ₹(\d+(?:\.\d+)?) (chocolate|snack)\)$/;
+
+/** Which item the shop gave for a free chocolate or snack; picking one takes it off the stock. */
+function GiftChoice({ freebie, products, busy, label, choose }: { freebie: string; products: Product[]; busy: boolean; label: string; choose: (productId: number | null) => void }) {
+  const given = GIVEN_TEXT.exec(freebie);
+  const generic = GIFT_TEXT.exec(freebie);
+  if (!given && !generic) return null;
+  const chocolate = given ? given[3] === "chocolate" : freebie.includes("chocolate");
+  const current = given ? products.find((product) => product.name === given[1]) : undefined;
+  // Items that can be given (in stock, or the one already given); chocolates first for a free chocolate.
+  const first = (product: Product) => Number(chocolate && /choc/i.test(product.category));
+  const choices = products
+    .filter((product) => product.stock > 0 || product.id === current?.id)
+    .sort((a, b) => first(b) - first(a) || a.mrp - b.mrp || a.name.localeCompare(b.name));
+  return (
+    <label className={`mt-2 grid gap-1 rounded-md p-2 text-xs font-bold ${given ? "bg-background/70" : "bg-accent text-accent-foreground"}`}>
+      {given ? `Free ${chocolate ? "chocolate" : "snack"} given (off the stock)` : `Which ${chocolate ? "chocolate" : "snack"} did you give free? It comes off the stock.`}
+      <select aria-label={label} disabled={busy} value={current?.id ?? ""} onChange={(event) => choose(event.target.value ? Number(event.target.value) : null)} className="h-9 rounded-md border border-input bg-card px-2 text-sm font-normal text-foreground">
+        <option value="">{given ? "None from the shop's stock (put it back)" : "Choose the item you gave…"}</option>
+        {choices.map((product) => <option key={product.id} value={product.id}>{product.name} · ₹{product.mrp} · {product.stock} left</option>)}
+      </select>
+    </label>
+  );
+}
+
+export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cancel, products, giveGift }: { order: AdminOrder; busy: boolean; setFulfilled: (fulfilled: boolean, paymentReceived?: boolean) => void; setPaymentReceived: (received: boolean) => void; cancel?: () => void; products?: Product[]; giveGift?: (index: number, productId: number | null) => void }) {
   // A UPI order whose payment isn't ticked yet: handing it over says the money arrived, so ask first.
   const handOver = () => {
     if (!awaitingConfirmation(order)) return setFulfilled(true);
@@ -1532,6 +1576,7 @@ export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cance
       </div>
       <p className="mt-2 text-sm">{order.items.map((item) => `${item.name} ×${item.qty}`).join(", ")}</p>
       {order.freebies?.length ? <p className="text-xs font-bold text-primary">Free: {order.freebies.join(", ")}</p> : null}
+      {giveGift && products && !order.cancelled && order.freebies.map((freebie, index) => <GiftChoice key={index} freebie={freebie} products={products} busy={busy} label={`Free item given with order ${orderLabel(order)}`} choose={(productId) => giveGift(index, productId)} />)}
       {order.cancelled ? null : order.payment === "UPI" ? (
         <div aria-label="Payment" className={`mt-2 rounded-md p-2 text-xs ${order.paymentConfirmed ? "bg-stock/40" : "bg-accent/60"}`}>
           <p className="font-bold">{order.paymentConfirmed ? "✓ UPI payment received" : order.utr ? "UPI · paid, please check" : "UPI · ⏳ waiting for payment"} · {money(order.total)}</p>

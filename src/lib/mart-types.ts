@@ -6,6 +6,9 @@ export type Product = {
   /** Rupees added to the MRP for customers (eggs: once per order); set on the item's card. */
   markup: number;
   stock: number;
+  /** Shop only: units in orders not handed over yet. Off the stock (customers can't order them) but still
+   * on the shelf, so the shelf has stock + held. */
+  held?: number;
   threshold: number;
   category: string;
   image?: string;

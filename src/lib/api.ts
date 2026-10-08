@@ -87,9 +87,10 @@ export const api = {
     removeWish: (name: string) => change(() => fn.removeWish({ data: { name } })),
     setPaymentReceived: (id: number, received: boolean) => change(() => fn.setPaymentReceived({ data: { id, received } })),
     createProduct: (product: { name: string; mrp: number; markup?: number; stock: number; category?: string; image?: string }) => change(() => fn.createProduct({ data: product })),
-    updateProduct: (id: number, changes: { stock?: number; stockDelta?: number; threshold?: number; mrp?: number; markup?: number; category?: string; image?: string | null }) =>
+    updateProduct: (id: number, changes: { stock?: number; stockDelta?: number; shelf?: number; threshold?: number; mrp?: number; markup?: number; category?: string; image?: string | null }) =>
       change<Product>(() => fn.updateProduct({ data: { id, changes } })),
     deleteProduct: (id: number) => change(() => fn.deleteProduct({ data: { id } })),
+    giveGift: (id: number, index: number, productId: number | null) => change(() => fn.giveGift({ data: { id, index, productId } })),
     savePromotions: (promotions: Promotions) => change(() => fn.savePromotions({ data: promotions })),
     switchWheel: (enabled: boolean) => change(() => fn.switchWheel({ data: { enabled } })),
     setStore: (override: StoreOverride) => change(() => fn.setStore({ data: { override } })),

@@ -227,6 +227,8 @@ export const updateProduct = createServerFn({ method: "POST" })
         changes: z.object({
           stock: z.number().int().min(0).max(100_000).optional(),
           stockDelta: z.number().int().min(-100_000).max(100_000).optional(),
+          // A shelf count: the server takes off what open orders hold.
+          shelf: z.number().int().min(0).max(100_000).optional(),
           threshold: z.number().int().min(0).max(100_000).optional(),
           mrp: z.number().positive().max(100_000).optional(),
           markup: z.number().int().min(0).max(1000).optional(),
@@ -237,6 +239,11 @@ export const updateProduct = createServerFn({ method: "POST" })
       .parse(data),
   )
   .handler(async ({ data }) => (await server()).callBackend<Product>(`/admin/products/${data.id}`, "PATCH", data.changes));
+
+/** Which item the shop gave for an order's free chocolate or snack (it comes off the stock); null: none from stock. */
+export const giveGift = createServerFn({ method: "POST" })
+  .validator((data: unknown) => id.extend({ index: z.number().int().min(0).max(20), productId: z.number().int().positive().nullable() }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<AdminOrder>(`/admin/orders/${data.id}/gift`, "POST", { index: data.index, productId: data.productId }));
 
 export const deleteProduct = createServerFn({ method: "POST" })
   .validator((data: unknown) => id.parse(data))
