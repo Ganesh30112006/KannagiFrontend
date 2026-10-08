@@ -131,7 +131,20 @@ export type Promotions = {
 };
 
 export type StoreOverride = "auto" | "online" | "offline";
-export type StoreStatus = { override: StoreOverride; online: boolean };
+/** offlineOrders: while offline, orders still go through (on request); false: customers send a request instead. */
+export type StoreStatus = { override: StoreOverride; online: boolean; offlineOrders?: boolean };
+
+/** What a customer asked the shop for while it wasn't taking orders (no stock taken, nothing paid). */
+export type OrderRequest = {
+  id: number;
+  createdAt: number;
+  items: { productId: number; name: string; qty: number }[];
+  delivery: Delivery;
+  note?: string;
+  /** Shopkeepers and admins only. */
+  customer?: OrderCustomer;
+};
+export type OrderRequestInput = { items: { productId: number; quantity: number }[]; delivery: Delivery; note?: string };
 
 export type CustomerProfile = { fullName: string; phone: string; block: Block; roomNumber: string };
 
@@ -182,6 +195,7 @@ export type Bootstrap = {
   user: User;
   products: Product[];
   orders: Order[];
+  myRequest?: OrderRequest | null;
   profile: CustomerProfile | null;
   promotions: Promotions;
   store: StoreStatus;
@@ -201,9 +215,10 @@ export type SyncResult = {
   promotions?: Promotions;
   wishes?: Wish[];
   orders?: Order[];
+  myRequest?: OrderRequest | null;
   firstOrderAvailable?: boolean;
   loyalty?: Loyalty;
-  admin?: { orders: AdminOrder[]; summary: SalesSummary; manualSales?: ManualSale[] };
+  admin?: { orders: AdminOrder[]; summary: SalesSummary; manualSales?: ManualSale[]; requests?: OrderRequest[] };
 };
 
 /** Sales of one kind: how many (orders or manual sales), units sold, money in, and what the items cost

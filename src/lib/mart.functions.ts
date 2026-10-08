@@ -13,6 +13,7 @@ import type {
   Live,
   ManualSale,
   Order,
+  OrderRequest,
   Product,
   Promotions,
   Result,
@@ -272,6 +273,31 @@ export const undoManualSale = createServerFn({ method: "POST" })
 export const setStore = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ override: z.enum(["auto", "online", "offline"]) }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<StoreStatus>("/admin/store", "PUT", data));
+
+/** While the store is offline: take orders (on request), or not (customers send a request instead). */
+export const switchOfflineOrders = createServerFn({ method: "POST" })
+  .validator((data: unknown) => z.object({ enabled: z.boolean() }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<StoreStatus>("/admin/offline-orders", "PUT", data));
+
+/** Done: the shop got in touch with her. */
+export const finishOrderRequest = createServerFn({ method: "POST" })
+  .validator((data: unknown) => z.object({ id: z.number().int().positive() }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<null>(`/admin/order-requests/${data.id}`, "DELETE"));
+
+/** What's in her cart, sent to the shop while it isn't taking orders. Sending again replaces it. */
+export const sendOrderRequest = createServerFn({ method: "POST" })
+  .validator((data: unknown) =>
+    z
+      .object({
+        items: z.array(z.object({ productId: z.number().int().positive(), quantity: z.number().int().min(1).max(100) })).min(1).max(50),
+        delivery: z.enum(["Pickup", "Room Delivery"]),
+        note: z.string().max(200).optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }) => (await server()).callBackend<OrderRequest>("/order-requests", "POST", data));
+
+export const withdrawOrderRequest = createServerFn({ method: "POST" }).handler(async () => (await server()).callBackend<null>("/order-requests/mine", "DELETE"));
 
 // --- notifications on this device (see order-alerts.ts): new orders for the shop, her own news for a customer ---
 

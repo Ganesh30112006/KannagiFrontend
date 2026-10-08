@@ -2,7 +2,7 @@
 // the browser never learns the backend's address and never holds the login token.
 import { write } from "./live-sync";
 import * as fn from "./mart.functions";
-import type { CustomerProfile, KnownRevs, ManualSaleInput, PlaceOrderInput, Product, Promotions, Result, StoreOverride } from "./mart-types";
+import type { CustomerProfile, KnownRevs, ManualSaleInput, OrderRequestInput, PlaceOrderInput, Product, Promotions, Result, StoreOverride } from "./mart-types";
 
 export class ApiError extends Error {
   constructor(
@@ -73,6 +73,9 @@ export const api = {
   myOrders: () => unwrap(fn.getMyOrders()),
   reportPayment: (id: number, utr: string) => change(() => fn.reportPayment({ data: { id, utr } })),
   placeOrder: (input: PlaceOrderInput) => change(() => fn.placeOrder({ data: input })),
+  /** While the shop isn't taking orders: ask for what's in the cart instead. */
+  sendOrderRequest: (input: OrderRequestInput) => change(() => fn.sendOrderRequest({ data: input })),
+  withdrawOrderRequest: () => change(() => fn.withdrawOrderRequest()),
 
   admin: {
     orders: () => unwrap(fn.adminOrders()),
@@ -90,6 +93,8 @@ export const api = {
     savePromotions: (promotions: Promotions) => change(() => fn.savePromotions({ data: promotions })),
     switchWheel: (enabled: boolean) => change(() => fn.switchWheel({ data: { enabled } })),
     setStore: (override: StoreOverride) => change(() => fn.setStore({ data: { override } })),
+    switchOfflineOrders: (enabled: boolean) => change(() => fn.switchOfflineOrders({ data: { enabled } })),
+    finishOrderRequest: (id: number) => change(() => fn.finishOrderRequest({ data: { id } })),
     recordManualSale: (sale: ManualSaleInput) => change(() => fn.recordManualSale({ data: sale })),
     undoManualSale: (id: number) => change(() => fn.undoManualSale({ data: { id } })),
   },

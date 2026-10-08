@@ -15,6 +15,7 @@ import {
   Hourglass,
   History,
   ImagePlus,
+  Inbox,
   LayoutDashboard,
   LockKeyhole,
   MessageCircle,
@@ -26,6 +27,7 @@ import {
   Receipt,
   RotateCcw,
   Search,
+  Send,
   ShoppingBag,
   ShoppingCart,
   Sparkles,
@@ -64,6 +66,8 @@ import type {
   Loyalty,
   ManualSale,
   Order,
+  OrderRequest,
+  OrderRequestInput,
   Payment,
   PlaceOrderInput,
   Product,
@@ -114,6 +118,10 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   const [wishes, setWishes] = useState<Wish[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [adminOrders, setAdminOrders] = useState<AdminOrder[]>([]);
+  // While the shop isn't taking orders: her request (customers), everyone's requests (the shop).
+  const [myRequest, setMyRequest] = useState<OrderRequest | null>(null);
+  const [orderRequests, setOrderRequests] = useState<OrderRequest[]>([]);
+  const newestRequestAt = useRef<number | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [wishInput, setWishInput] = useState("");
   const [wishMessage, setWishMessage] = useState("");
@@ -174,6 +182,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       setFirstOrder(data.user.firstOrderAvailable);
       setProducts(data.products);
       setOrders(data.orders);
+      setMyRequest(data.myRequest ?? null);
       if (data.profile) { setProfile(data.profile); setProfileSaved(true); }
       // Customers are asked once for their hostel details; the shopkeeper isn't (she runs the shop).
       else if (!data.user.isShopkeeper) setProfileOpen(true);
@@ -236,6 +245,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       if (payingNow?.paymentConfirmed) { setPaying(null); setReceipt(payingNow); }
       if (data.firstOrderAvailable !== undefined) setFirstOrder(data.firstOrderAvailable);
     }
+    if (data.myRequest !== undefined) setMyRequest(data.myRequest);
     if (data.admin) {
       const rows = data.admin.orders;
       const newest = rows[0]?.id ?? 0;
@@ -247,6 +257,15 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       setAdminOrders(rows);
       setSalesSummary(data.admin.summary);
       if (data.admin.manualSales) setManualSales(data.admin.manualSales);
+      if (data.admin.requests) {
+        const latest = Math.max(0, ...data.admin.requests.map((request) => request.createdAt));
+        if (newestRequestAt.current !== null && latest > newestRequestAt.current) {
+          toast.info("A customer sent an order request!", { duration: 15_000 });
+          navigator.vibrate?.(200);
+        }
+        newestRequestAt.current = latest;
+        setOrderRequests(data.admin.requests);
+      }
     }
     revs.current = { ...data.revs, adminOrders: data.admin ? data.revs.orders : revs.current.adminOrders };
   }
@@ -268,6 +287,8 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   }, [coupon]);
 
   const storeOnline = store?.online ?? false;
+  // Offline, the shop may still take orders (on request), or only requests.
+  const takingOrders = storeOnline || store?.offlineOrders !== false;
 
   // Clamp to current stock so a restock/sale elsewhere never leaves the cart over the limit.
   const cartItems = useMemo(
@@ -396,6 +417,34 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
     }
   }
 
+  async function switchOfflineOrders(enabled: boolean) {
+    try {
+      setStore(await api.admin.switchOfflineOrders(enabled));
+      toast.success(enabled ? "While offline, customers can order (on request)." : "While offline, customers send a request instead of ordering.");
+    } catch (error) {
+      toast.error(errorText(error, "Could not change that."));
+    }
+  }
+
+  async function finishOrderRequest(request: OrderRequest) {
+    try {
+      await api.admin.finishOrderRequest(request.id);
+      setOrderRequests((current) => current.filter((item) => item.id !== request.id));
+    } catch (error) {
+      toast.error(errorText(error, "Could not mark the request done."));
+    }
+  }
+
+  async function withdrawRequest() {
+    try {
+      await api.withdrawOrderRequest();
+      setMyRequest(null);
+      toast.success("Request withdrawn.");
+    } catch (error) {
+      toast.error(errorText(error, "Could not withdraw the request."));
+    }
+  }
+
   return (
     <SiteContext.Provider value={site}>
     <main className="min-h-screen bg-background pb-24 text-foreground">
@@ -416,9 +465,10 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
           <div className="mt-4 min-h-11">
             {store && (
               <p className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold shadow-[3px_4px_0_var(--shadow-color)] ${storeOnline ? "bg-stock text-stock-foreground" : "bg-accent text-accent-foreground"}`}>
-                {storeOnline ? "🟢 Store is ONLINE — Midnight Craving Service Active!" : "🌙 Store Offline — Orders available on request when shopkeeper is around!"}
+                {storeOnline ? "🟢 Store is ONLINE — Midnight Craving Service Active!" : takingOrders ? "🌙 Store Offline — Orders available on request when shopkeeper is around!" : "🌙 Store Offline — not taking orders right now. Send the shop a request from your cart!"}
               </p>
             )}
+            {myRequest && !adminUnlocked && <MyRequestNote request={myRequest} takingOrders={takingOrders} onWithdraw={() => void withdrawRequest()} />}
             {unpaid && !paying && <div role="status" className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-card/95 px-4 py-3 text-sm font-semibold text-foreground shadow-[3px_4px_0_var(--shadow-color)]"><p className="min-w-0 flex-1 basis-60">💳 Order {orderLabel(unpaid)} is waiting for your UPI payment of {money(unpaid.total)}.</p><Button size="sm" onClick={() => setPaying(unpaid)}>Pay now</Button></div>}
           </div>
 
@@ -452,7 +502,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       ) : mode === "spin" ? (
         <SpinPage enabled={wheelEnabled} prizes={wheelRewards.filter((prize) => prize.active)} spun={spun} coupon={coupon} onResult={finishSpin} onShop={() => { setMode("customer"); void navigate({ to: "/shop" }); }} />
       ) : mode === "history" ? <OrderHistory orders={orders} onOpen={setReceipt} onPay={setPaying} onEditProfile={() => setProfileOpen(true)} onOrderAgain={orderAgain} loyalty={loyalty} /> : adminUnlocked ? (
-        <AdminView products={products} setProducts={setProducts} wishes={wishes} {...(user.isAdmin ? { removeWish } : {})} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} wheelEnabled={wheelEnabled} switchWheel={switchWheel} promotionsUnsaved={promotionsUnsaved} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={applyPromotions} />
+        <AdminView products={products} setProducts={setProducts} wishes={wishes} {...(user.isAdmin ? { removeWish } : {})} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} offlineOrders={store?.offlineOrders !== false} switchOfflineOrders={(enabled) => void switchOfflineOrders(enabled)} requests={orderRequests} finishRequest={(request) => void finishOrderRequest(request)} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} wheelEnabled={wheelEnabled} switchWheel={switchWheel} promotionsUnsaved={promotionsUnsaved} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={applyPromotions} />
       ) : (
         <section className="mx-auto grid max-w-md gap-3 px-4 py-16 text-center">
           <h2 className="font-hand text-3xl font-bold">Shopkeeper dashboard</h2>
@@ -477,6 +527,18 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
           dailyOffers={dailyOffers}
           couponRule={couponRule}
           storeOnline={storeOnline}
+          takingOrders={takingOrders}
+          myRequest={myRequest}
+          onRequest={async (input) => {
+            try {
+              setMyRequest(await api.sendOrderRequest(input));
+              setCartOpen(false);
+              toast.success("Request sent! The shopkeeper will see it and get in touch with you.", { duration: 8000 });
+            } catch (error) {
+              toast.error(errorText(error, "Could not send the request."), { duration: 8000 });
+              void loadAll();
+            }
+          }}
           loyalty={loyalty}
           onClose={() => setCartOpen(false)}
           profile={profile}
@@ -732,7 +794,7 @@ function SpinPage({ enabled, prizes, spun, coupon, onResult, onShop }: { enabled
   );
 }
 
-function AdminView({ products, setProducts, wishes, removeWish, orders, setOrders, override, setOverride, storeOnline, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, wheelEnabled, switchWheel, promotionsUnsaved, summary, manualSales, setManualSales, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; removeWish?: (name: string) => void; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; wheelEnabled: boolean; switchWheel: (enabled: boolean) => Promise<void>; promotionsUnsaved: boolean; summary: SalesSummary | null; manualSales: ManualSale[]; setManualSales: React.Dispatch<React.SetStateAction<ManualSale[]>>; promotionsSaved: (saved: Promotions) => void }) {
+function AdminView({ products, setProducts, wishes, removeWish, orders, setOrders, override, setOverride, storeOnline, offlineOrders, switchOfflineOrders, requests, finishRequest, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, wheelEnabled, switchWheel, promotionsUnsaved, summary, manualSales, setManualSales, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; removeWish?: (name: string) => void; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; offlineOrders: boolean; switchOfflineOrders: (enabled: boolean) => void; requests: OrderRequest[]; finishRequest: (request: OrderRequest) => void; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; wheelEnabled: boolean; switchWheel: (enabled: boolean) => Promise<void>; promotionsUnsaved: boolean; summary: SalesSummary | null; manualSales: ManualSale[]; setManualSales: React.Dispatch<React.SetStateAction<ManualSale[]>>; promotionsSaved: (saved: Promotions) => void }) {
   const site = useSite();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -968,7 +1030,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
 
       <section className="mt-5 border-2 border-dashed border-primary/35 bg-card p-4 shadow-[4px_5px_0_var(--shadow-color)]">
         <h3 className="font-hand text-2xl font-bold">Store status</h3>
-        <p className="mt-1 text-sm text-muted-foreground">Auto follows shop hours ({hoursLabel(site)}). Right now customers see: <b>{storeOnline ? "Online" : "Offline / on request"}</b>.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Auto follows shop hours ({hoursLabel(site)}). Right now customers see: <b>{storeOnline ? "Online" : offlineOrders ? "Offline / on request" : "Offline / requests only"}</b>.</p>
         <div className="mt-3 grid grid-cols-3 gap-2">
           {(["auto", "online", "offline"] as const).map((option) => (
             <Button key={option} variant={override === option ? "default" : "outline"} onClick={() => setOverride(option)} className="h-auto min-h-10 whitespace-normal capitalize">
@@ -976,6 +1038,12 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
             </Button>
           ))}
         </div>
+        <h4 className="mt-4 text-sm font-bold">While the store is offline</h4>
+        <div role="group" aria-label="While the store is offline" className="mt-2 grid grid-cols-2 gap-2">
+          <Button variant={offlineOrders ? "default" : "outline"} aria-pressed={offlineOrders} onClick={() => !offlineOrders && switchOfflineOrders(true)} className="h-auto min-h-10 whitespace-normal">Take orders (on request)</Button>
+          <Button variant={offlineOrders ? "outline" : "default"} aria-pressed={!offlineOrders} onClick={() => offlineOrders && switchOfflineOrders(false)} className="h-auto min-h-10 whitespace-normal">Don&apos;t take orders</Button>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">{offlineOrders ? "Customers can order while the store is offline; you confirm those orders when you're around." : "Customers can't order while the store is offline. They send you a request for what's in their cart instead (no stock is kept for it); requests show under Order requests."}</p>
       </section>
 
       <section className="mt-5 border-2 border-dashed border-primary/35 bg-card p-4 shadow-[4px_5px_0_var(--shadow-color)]">
@@ -1022,6 +1090,16 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
         </section>
         <aside className="space-y-7">
           <section className="border-2 border-dashed border-primary/35 bg-accent p-5"><h3 className="font-hand text-2xl font-bold">Customer Wishlist Requests</h3><p className="mt-1 text-xs">A request goes away by itself when you add that item (same name) with stock.{removeWish ? " Tap × to remove one." : ""}</p><div className="mt-4 space-y-3">{wishes.length === 0 && <p className="text-sm">No requests yet.</p>}{wishes.map(({ name, count }, index) => <div key={name} className={`grid ${removeWish ? "grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]" : "grid-cols-[auto_minmax(0,1fr)_auto_auto]"} items-center gap-3 border-b border-foreground/10 pb-2`}><span className="grid size-7 place-items-center rounded-full bg-primary font-bold text-primary-foreground">{index+1}</span><span className="font-bold [overflow-wrap:anywhere]">{name}</span><span className="text-sm">{plural(count, "Request")}</span><Button size="icon" variant="ghost" className="size-8" aria-label={`Add ${name} to the shop`} title="Add this item" onClick={() => openAddForm(name)}><PackagePlus /></Button>{removeWish && <Button size="icon" variant="ghost" className="size-8" aria-label={`Remove request: ${name}`} onClick={() => removeWish(name)}><X /></Button>}</div>)}</div></section>
+          {(requests.length > 0 || !offlineOrders) && (
+            <section aria-labelledby="requests-title">
+              <h3 id="requests-title" className="flex items-center gap-2 font-hand text-3xl font-bold"><Inbox className="size-7 text-primary" /> Order requests{requests.length > 0 && <span className="rounded-full bg-alert px-2 font-sans text-sm leading-6 text-alert-foreground">{requests.length}</span>}</h3>
+              <p className="text-xs text-muted-foreground">Sent while the store was offline and not taking orders. Get in touch with her, then tap Done. No stock is kept for a request.</p>
+              <div className="mt-3 space-y-3">
+                {requests.length === 0 && <p className="border-2 border-dashed border-border bg-card p-4 text-center text-sm text-muted-foreground">No requests right now.</p>}
+                {requests.map((request) => <RequestCard key={request.id} request={request} done={() => finishRequest(request)} />)}
+              </div>
+            </section>
+          )}
           <section>
             <h3 className="font-hand text-3xl font-bold">Incoming Orders</h3>{summary && summary.orderCount > orders.length && <p className="text-xs text-muted-foreground">Showing the latest {orders.length} of {summary.orderCount} orders.</p>}
             <div role="group" aria-label="Show orders" className="mt-3 grid grid-cols-3 gap-1 rounded-md border border-border bg-card p-1">
@@ -1357,6 +1435,72 @@ const orderTime = (ms: number) => new Date(ms).toLocaleString("en-IN", { day: "n
 
 /** One order for the shopkeeper: who it's for (name, mobile with Call / WhatsApp, where to hand it over), then what's in it. */
 /** One order as the shopkeeper sees it; `cancel` adds the site admin's Cancel button. */
+const requestItems = (request: OrderRequest) => request.items.map((item) => `${item.name} ×${item.qty}`).join(", ");
+
+/** Her request on the shop page: what she asked for, and Withdraw. */
+function MyRequestNote({ request, takingOrders, onWithdraw }: { request: OrderRequest; takingOrders: boolean; onWithdraw: () => void }) {
+  return (
+    <div role="status" aria-label="Your request" className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-card/95 px-4 py-3 text-sm font-semibold text-foreground shadow-[3px_4px_0_var(--shadow-color)]">
+      <p className="min-w-0 flex-1 basis-60">📨 Your request was sent {orderTime(request.createdAt)}: {requestItems(request)}. {takingOrders ? "The shop is taking orders now: you can order these from your cart." : "The shopkeeper will get in touch with you."}</p>
+      <Button size="sm" variant="outline" onClick={onWithdraw}>Withdraw</Button>
+    </div>
+  );
+}
+
+/** In the cart while the shop isn't taking orders: the delivery she'd like, a note, and Send. */
+function RequestForm({ cartItems, deliveries, myRequest, subtotal, onRequest }: { cartItems: (Product & { qty: number })[]; deliveries: readonly string[]; myRequest: OrderRequest | null; subtotal: number; onRequest: (input: OrderRequestInput) => Promise<void> }) {
+  const [delivery, setDelivery] = useState<Delivery>((deliveries[0] as Delivery | undefined) ?? "Pickup");
+  const [note, setNote] = useState("");
+  const [sending, setSending] = useState(false);
+  async function send() {
+    if (sending || !cartItems.length) return;
+    setSending(true);
+    try {
+      await onRequest({ items: cartItems.map((item) => ({ productId: item.id, quantity: item.qty })), delivery, ...(note.trim() ? { note: note.trim() } : {}) });
+    } finally {
+      setSending(false);
+    }
+  }
+  return (
+    <>
+      {myRequest && <p className="mt-4 rounded-md border-2 border-dashed border-primary/35 bg-card p-3 text-sm">You already sent a request {orderTime(myRequest.createdAt)} ({requestItems(myRequest)}). Sending again replaces it.</p>}
+      <div className="mt-4 flex justify-between text-sm"><span>Items at today&apos;s prices</span><span>{money(subtotal)}</span></div>
+      <div className="mt-4 grid gap-2">
+        <p className="font-hand text-xl font-bold">How would you like it?</p>
+        <div role="group" aria-label="Request delivery" className="grid grid-cols-2 gap-2">
+          {deliveries.map((option) => <Button key={option} type="button" variant={delivery === option ? "default" : "outline"} aria-pressed={delivery === option} onClick={() => setDelivery(option as Delivery)}>{option}</Button>)}
+        </div>
+      </div>
+      <label className="mt-4 grid gap-1 text-sm font-semibold">Note for the shopkeeper (optional)<textarea aria-label="Request note" maxLength={200} rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="e.g. I'm awake till 1 am" className="rounded-md border border-input bg-card px-3 py-2 text-sm font-normal" /></label>
+      <Button onClick={() => void send()} disabled={sending} className="mt-4 h-12 w-full text-base"><Send /> {sending ? "Sending…" : myRequest ? "Send new request" : "Send request to the shop"}</Button>
+    </>
+  );
+}
+
+/** A customer's request on the dashboard: who, where, what, and Done. */
+function RequestCard({ request, done }: { request: OrderRequest; done: () => void }) {
+  const { name, phone, block, room } = request.customer ?? {};
+  const hostelRoom = block && room ? `Block ${block}, Room ${room}` : room ? `Room ${room}` : null;
+  const call = phone ? callLink(phone) : undefined;
+  const chat = phone ? whatsappChat(phone, `Hi${name ? ` ${name}` : ""}! About your Kannagi Night Mart request (${requestItems(request)}): `) : undefined;
+  return (
+    <article aria-label={`Request from ${name ?? "a customer"}`} className="min-w-0 border-2 border-primary/30 bg-card p-4 [overflow-wrap:anywhere] shadow-[3px_4px_0_var(--shadow-color)]">
+      <div className="flex items-baseline justify-between gap-2"><p className="font-hand text-xl font-bold">{name ?? "Name not saved"}</p><span className="text-xs text-muted-foreground">{orderTime(request.createdAt)}</span></div>
+      {phone ? (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <span className="tabular-nums">{formatMobile(phone)}</span>
+          {call && <a className="inline-flex items-center gap-1 font-semibold text-primary underline" href={call}><Phone className="size-3.5" />Call</a>}
+          {chat && <a className="inline-flex items-center gap-1 font-semibold text-primary underline" href={chat} target="_blank" rel="noopener noreferrer"><MessageCircle className="size-3.5" />WhatsApp</a>}
+        </p>
+      ) : <p className="text-sm text-muted-foreground">No mobile number saved</p>}
+      <p className="mt-1 text-sm">{request.delivery === "Room Delivery" ? <>🚚 Room delivery{hostelRoom ? ` to ${hostelRoom}` : ""}</> : <>🛍️ Pickup{hostelRoom ? ` · stays in ${hostelRoom}` : ""}</>}</p>
+      <p className="mt-2 text-sm font-semibold">{requestItems(request)}</p>
+      {request.note && <p className="mt-1 rounded-md bg-background/70 p-2 text-sm">“{request.note}”</p>}
+      <Button className="mt-3 w-full" variant="secondary" onClick={done}><Check /> Done</Button>
+    </article>
+  );
+}
+
 export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cancel }: { order: AdminOrder; busy: boolean; setFulfilled: (fulfilled: boolean, paymentReceived?: boolean) => void; setPaymentReceived: (received: boolean) => void; cancel?: () => void }) {
   // A UPI order whose payment isn't ticked yet: handing it over says the money arrived, so ask first.
   const handOver = () => {
@@ -1685,7 +1829,7 @@ function OrderReceipt({ order, fresh, onPay, close }: { order: Order; fresh: boo
   return <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/55 p-4 backdrop-blur-sm"><section className="max-h-[92vh] w-full max-w-sm overflow-y-auto rounded-lg border-2 border-dashed border-primary/50 bg-card p-6 text-center shadow-[7px_8px_0_var(--shadow-color)]">{order.cancelled ? <div className="mx-auto grid size-14 place-items-center rounded-full bg-destructive text-destructive-foreground"><X className="size-7" /></div> : orderState(order).waiting ? <div className="mx-auto grid size-14 place-items-center rounded-full bg-accent text-accent-foreground"><Hourglass className="size-7" /></div> : <div className="mx-auto grid size-14 place-items-center rounded-full bg-stock text-stock-foreground"><Check className="size-7" /></div>}<p className="mt-3 font-hand text-lg font-bold text-primary">{order.cancelled || orderState(order).waiting ? orderState(order).badge : fresh ? "Order placed!" : order.createdAt ? new Date(order.createdAt).toLocaleString() : "Receipt"}</p><h2 className="font-display text-4xl font-extrabold">Order {orderLabel(order)}</h2><p className="mt-2 text-sm text-muted-foreground">{order.delivery === "Pickup" ? "Tell the shopkeeper this order ID when you pick up your snacks." : "Keep this number for delivery updates."}</p><div className="mt-4 rounded-md bg-product p-4 text-left text-sm"><p><b>{order.items.map((item) => `${item.name} ×${item.qty}`).join(", ")}</b></p><p className="mt-1">{order.delivery} · {order.payment}</p><p className="mt-1 font-semibold">{orderState(order).detail}</p>{order.discountLabel && <p className="mt-1 font-semibold">{order.discountLabel}{order.discount > 0 ? ` (−${money(order.discount)})` : ""}</p>}{order.freebies.length > 0 && <p className="font-semibold">Free: {order.freebies.join(", ")}</p>}{order.onRequest && <p className="mt-1 text-xs">Placed while the store was offline — the shopkeeper will confirm it.</p>}<p className="mt-2 text-xl font-extrabold text-primary">Total {money(order.total)}</p></div>{order.delivery === "Pickup" && !order.cancelled && <div className="mt-4 rounded-md bg-accent p-3 text-sm font-semibold text-accent-foreground"><p>If {site.pickupPoint} is closed or the shopkeeper is unavailable, call {spacedPhone(site.helpPhone)} for assistance.</p><Button asChild variant="outline" className="mt-3 w-full bg-card"><a href={`tel:+91${site.helpPhone}`}><Phone /> Call {spacedPhone(site.helpPhone)}</a></Button></div>}{needsPayment(order) && <Button onClick={onPay} className="mt-5 w-full">Pay {money(order.total)} by UPI now</Button>}<Button onClick={close} variant={needsPayment(order) ? "outline" : "default"} className={needsPayment(order) ? "mt-2 w-full" : "mt-5 w-full"}>Done</Button></section></div>;
 }
 
-function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, couponRule, storeOnline, loyalty, profile, onClose, onComplete }: { cartItems: (Product & { qty: number })[]; products: Product[]; coupon: Coupon | null; firstOrder: boolean; dailyOffers: DailyOffer[]; couponRule: CouponRule; storeOnline: boolean; loyalty: Loyalty | null; profile: CustomerProfile; onClose: () => void; onComplete: (input: PlaceOrderInput) => Promise<void> }) {
+function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, couponRule, storeOnline, takingOrders, myRequest, onRequest, loyalty, profile, onClose, onComplete }: { cartItems: (Product & { qty: number })[]; products: Product[]; coupon: Coupon | null; firstOrder: boolean; dailyOffers: DailyOffer[]; couponRule: CouponRule; storeOnline: boolean; takingOrders: boolean; myRequest: OrderRequest | null; onRequest: (input: OrderRequestInput) => Promise<void>; loyalty: Loyalty | null; profile: CustomerProfile; onClose: () => void; onComplete: (input: PlaceOrderInput) => Promise<void> }) {
   const site = useSite();
   const rules = priceRules(site);
   // Only the options the admin has turned on (at least one of each always is).
@@ -1767,12 +1911,14 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
           <p className="py-12 text-center text-muted-foreground">Your cart is waiting for a snack.</p>
         ) : (
           <>
-            {!storeOnline && <p className="mt-4 rounded-md bg-accent p-3 text-sm font-semibold text-accent-foreground">🌙 Store is offline right now — your order goes through as an <b>on-request</b> order and the shopkeeper will confirm it.</p>}
+            {!storeOnline && takingOrders && <p className="mt-4 rounded-md bg-accent p-3 text-sm font-semibold text-accent-foreground">🌙 Store is offline right now — your order goes through as an <b>on-request</b> order and the shopkeeper will confirm it.</p>}
+            {!takingOrders && <p className="mt-4 rounded-md bg-accent p-3 text-sm font-semibold text-accent-foreground">🌙 The store is offline and isn&apos;t taking orders right now. Send the shop a <b>request</b> for these snacks: the shopkeeper sees it and gets in touch with you. Nothing is charged until you order.</p>}
 
             <div className="mt-5 space-y-2">
               {cartItems.map(item => <div key={item.id} className="flex items-center justify-between border-b border-border py-2"><span className="flex items-center gap-2">{item.image ? <img src={item.image} alt="" className="size-8 rounded object-cover" /> : <span aria-hidden="true">{item.emoji}</span>}<span><b>{item.name}</b> × {item.qty}</span></span><span>{money(toRupees(lineTotal(item, item.qty)))}</span></div>)}
             </div>
 
+            {!takingOrders ? <RequestForm cartItems={cartItems} deliveries={deliveries} myRequest={myRequest} subtotal={subtotal} onRequest={onRequest} /> : <>
             {coupon && <div className={`mt-4 rounded-md border-2 border-dashed p-3 text-sm font-bold ${couponApplied ? "border-stock bg-stock text-stock-foreground" : "border-primary/30 bg-banner text-foreground"}`}><p>{coupon.icon} {coupon.label}</p><p className="mt-1 text-xs font-semibold">{couponCheck.eligible && !couponApplied ? `Saved for later: ${best?.label ?? "another offer"} saves you more on this order.` : couponCheck.reason}</p>{!couponCheck.eligible && <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => toast.info(couponCheck.reason)}>Check coupon</Button>}</div>}
 
             {(gift > 0 || freeDelivery || getsFreePick) && (
@@ -1835,6 +1981,7 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
               <div className="flex justify-between font-hand text-2xl font-bold"><span>Total</span><span>{money(total)}</span></div>
             </div>
             <Button onClick={() => void placeOrder()} disabled={placing} className="mt-4 h-12 w-full text-base">{placing ? "Placing order…" : payment === "UPI" ? `Place Order & Pay ${money(total)}` : `Place Order · ${money(total)}`}</Button>
+            </>}
           </>
         )}
       </section>
