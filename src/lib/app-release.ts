@@ -1,9 +1,9 @@
-// Staff pages (the shopkeeper's dashboard, /admin) stay open for days, and a Home Screen app has no
-// reload button, so they would keep running an old release: no new features, old fixes missing. This
-// notices a new release by comparing the page's main script with the one the site serves now. Coming
-// back to the page after a while (nobody is in the middle of something then) reloads it at once;
-// otherwise it offers a Reload button.
-import { useEffect } from "react";
+// Pages stay open for days (a Home Screen app has no reload button), so they would keep running an old
+// release: no new features, old fixes missing, and prices or stock read the old way. This notices a new
+// release by comparing the page's main script with the one the site serves now. Coming back to the page
+// after a while reloads it at once, unless it's busy (a customer at checkout or paying); otherwise it
+// offers a Reload button.
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 const MAIN_SCRIPT = /\/assets\/index-[\w-]+\.js/;
@@ -25,7 +25,9 @@ async function servedScript(): Promise<string | null> {
   return (await response.text()).match(MAIN_SCRIPT)?.[0] ?? null;
 }
 
-export function useNewRelease(enabled = true) {
+export function useNewRelease(enabled = true, busy: () => boolean = () => false) {
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
   useEffect(() => {
     if (!enabled) return;
     const running = runningScript();
@@ -40,7 +42,7 @@ export function useNewRelease(enabled = true) {
       try {
         const served = await servedScript();
         if (!served || served === running) return;
-        if (cameBack) {
+        if (cameBack && !busyRef.current()) {
           window.location.reload();
           return;
         }

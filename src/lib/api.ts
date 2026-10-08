@@ -91,6 +91,7 @@ export const api = {
       change<Product>(() => fn.updateProduct({ data: { id, changes } })),
     deleteProduct: (id: number) => change(() => fn.deleteProduct({ data: { id } })),
     giveGift: (id: number, index: number, productId: number | null) => change(() => fn.giveGift({ data: { id, index, productId } })),
+    cancelOrder: (id: number) => change(() => fn.cancelOrder({ data: { id } })),
     savePromotions: (promotions: Promotions) => change(() => fn.savePromotions({ data: promotions })),
     switchWheel: (enabled: boolean) => change(() => fn.switchWheel({ data: { enabled } })),
     setStore: (override: StoreOverride) => change(() => fn.setStore({ data: { override } })),

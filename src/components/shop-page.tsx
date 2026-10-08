@@ -99,6 +99,8 @@ const CATEGORIES = ["Snacks", "Chips", "Chocolates", "Biscuits", "Noodles", "Dri
 const categoryOptions = (current?: string) => (current && !CATEGORIES.includes(current) ? [...CATEGORIES, current] : CATEGORIES);
 const errorText = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 
+const CART_KEY = "knm-cart";
+
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 
@@ -110,11 +112,27 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   const navigate = useNavigate();
   const [mode, setMode] = useState<"customer" | "spin" | "history" | "admin">(initialMode);
   const [adminUnlocked, setAdminUnlocked] = useState(user.isShopkeeper);
-  // The shopkeeper's page stays open for days (a Home Screen app never reloads): pick up new releases.
-  useNewRelease(adminUnlocked && !embedded);
+  // Pages stay open for days (a Home Screen app never reloads): pick up new releases, but never in the
+  // middle of a checkout or a payment. (The cart is kept across the reload: see CART_KEY.)
+  useNewRelease(!embedded, () => cartOpen || paying !== null || receipt !== null);
   const [loaded, setLoaded] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<Record<number, number>>({});
+  // Her cart, kept for this tab, so a reload (a new release) doesn't empty it.
+  const cartKey = `${CART_KEY}:${user.id}`;
+  useEffect(() => {
+    try {
+      const saved: unknown = JSON.parse(sessionStorage.getItem(cartKey) ?? "null");
+      if (!saved || typeof saved !== "object") return;
+      const restored = Object.fromEntries(Object.entries(saved).filter(([id, qty]) => /^\d+$/.test(id) && typeof qty === "number" && Number.isInteger(qty) && qty > 0 && qty <= 100)) as Record<number, number>;
+      if (Object.keys(restored).length) setCart((current) => (Object.keys(current).length ? current : restored));
+    } catch { /* storage blocked: start empty */ }
+  }, [cartKey]);
+  useEffect(() => {
+    try {
+      if (Object.keys(cart).length) sessionStorage.setItem(cartKey, JSON.stringify(cart)); else sessionStorage.removeItem(cartKey);
+    } catch { /* storage blocked: the cart just isn't kept */ }
+  }, [cart, cartKey]);
   const [wishes, setWishes] = useState<Wish[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [adminOrders, setAdminOrders] = useState<AdminOrder[]>([]);
@@ -862,6 +880,23 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
   }
 
 
+  // The shelf can't hold fewer than the orders not handed over yet: those are already sold. Say so, and how
+  // to put it right, instead of quietly showing the same number again.
+  function heldNote(item: Product) {
+    const held = item.held ?? 0;
+    toast.info(`${item.name}: ${held} on the shelf ${held === 1 ? "is" : "are"} for orders not handed over yet, so the count can't go lower. If one is missing or damaged, cancel that order (Orders on the Dashboard) or give her something else.`, { id: `held-${item.id}`, duration: 8000 });
+  }
+
+  function shelfMinus(item: Product) {
+    if (item.stock === 0 && (item.held ?? 0) > 0) { heldNote(item); return; }
+    changeProduct(item.id, "stock", -1);
+  }
+
+  function shelfCounted(item: Product, value: number) {
+    if (value < (item.held ?? 0)) heldNote(item);
+    void updateProduct(item.id, { shelf: value });
+  }
+
   // An emptied or mistyped price box must not save ₹0 (the item would then sell for just the markup).
   function changePrice(item: Product, input: HTMLInputElement) {
     const mrp = parsePrice(input.value);
@@ -967,6 +1002,23 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
       if (fulfilled) toast.success(`Order ${orderLabel(order)} marked as fulfilled.`, { action: { label: "Undo", onClick: () => void setFulfilled(updated, false) } });
     } catch (error) {
       toast.error(errorText(error, "Could not update the order."));
+    } finally {
+      setUpdatingOrder(null);
+    }
+  }
+
+  /** An order that won't be handed over (never paid for, nobody came): its items go back on the shelf. */
+  async function cancelOrder(order: AdminOrder) {
+    const paid = order.payment === "UPI" && (order.paymentConfirmed || order.utr);
+    if (!window.confirm(`Cancel order ${orderLabel(order)} (${money(order.total)})? Its items go back on the shelf, she's told, and it stops counting in sales.${paid ? " She paid by UPI: return the money to her yourself." : ""}`)) return;
+    setUpdatingOrder(order.id);
+    try {
+      const updated = await api.admin.cancelOrder(order.id);
+      setOrders((current) => current.map((item) => (item.id === order.id ? updated : item)));
+      setProducts(await api.products());
+      toast.success(`Order ${orderLabel(order)} cancelled. Its items are back on the shelf.`);
+    } catch (error) {
+      toast.error(errorText(error, "Could not cancel the order."));
     } finally {
       setUpdatingOrder(null);
     }
@@ -1095,7 +1147,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-2"><label className="grid gap-1 text-xs font-bold">Purchase / MRP price<Input key={item.mrp} type="number" min="0" step="0.01" defaultValue={item.mrp} onBlur={(event) => changePrice(item, event.target)} /></label><label className="grid gap-1 text-xs font-bold">Price hike (₹)<Input key={item.markup} type="number" inputMode="numeric" min="0" max="1000" step="1" aria-label={`${item.name} price hike`} defaultValue={item.markup} onBlur={(event) => changeMarkup(item, event.target)} /></label></div>
                 {/* The shelf: what's left to order plus what open orders hold (still there until handed over). A typed number is a shelf count; the server keeps open orders taken off. */}
-                <Counter label="On the shelf" value={item.stock + (item.held ?? 0)} minus={() => changeProduct(item.id,"stock",-1)} plus={() => changeProduct(item.id,"stock",1)} set={(value) => void updateProduct(item.id, { shelf: value })} />
+                <Counter label="On the shelf" value={item.stock + (item.held ?? 0)} minus={() => shelfMinus(item)} plus={() => changeProduct(item.id,"stock",1)} set={(value) => shelfCounted(item, value)} />
                 {(item.held ?? 0) > 0 && <p className="mt-1 text-xs text-muted-foreground">{item.held} of them for orders not handed over yet · {item.stock} left for customers to order</p>}
                 <Counter label="Restock threshold" value={item.threshold} minus={() => changeProduct(item.id,"threshold",-1)} plus={() => changeProduct(item.id,"threshold",1)} set={(value) => changeProduct(item.id, "threshold", value - item.threshold)} />
                 <label className="mt-3 grid gap-1 text-xs font-bold">Shelf section<select aria-label={`${item.name} shelf section`} value={item.category} onChange={(e) => { const category = e.target.value; setProducts((current) => current.map((product) => (product.id === item.id ? { ...product, category } : product))); void updateProduct(item.id, { category }); }} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm font-normal">{categoryOptions(item.category).map((name) => <option key={name}>{name}</option>)}</select></label>
@@ -1126,7 +1178,7 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
             <label className="relative mt-2 block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" className="pl-9" placeholder="Name, mobile, room or order #" aria-label="Search orders" value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} /></label>
             <div className="mt-4 space-y-3">
               {shownOrders.length === 0 && <p className="border-2 border-dashed border-border bg-card p-6 text-center text-muted-foreground">{orders.length === 0 ? "No orders yet." : orderSearch.trim() ? "No orders match your search." : orderFilter === "pending" ? "All caught up: no pending orders. 🎉" : "No orders here yet."}</p>}
-              {shownOrders.map((order) => <OrderCard key={order.id} order={order} busy={updatingOrder === order.id} setFulfilled={(fulfilled, paymentReceived) => void setFulfilled(order, fulfilled, paymentReceived)} setPaymentReceived={(received) => void setPaymentReceived(order, received)} products={products} giveGift={(index, productId) => void giveGift(order, index, productId)} />)}
+              {shownOrders.map((order) => <OrderCard key={order.id} order={order} busy={updatingOrder === order.id} setFulfilled={(fulfilled, paymentReceived) => void setFulfilled(order, fulfilled, paymentReceived)} setPaymentReceived={(received) => void setPaymentReceived(order, received)} cancel={() => void cancelOrder(order)} products={products} giveGift={(index, productId) => void giveGift(order, index, productId)} />)}
             </div>
           </section>
         </aside>
@@ -1560,7 +1612,7 @@ export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cance
     <article aria-label={`Order ${orderLabel(order)}`} className={`min-w-0 border-2 border-foreground/10 p-4 [overflow-wrap:anywhere] shadow-[3px_4px_0_var(--shadow-color)] ${order.fulfilled || order.cancelled ? "bg-muted" : "bg-card"}`}>
       <div className="flex items-baseline justify-between gap-2"><p className="font-hand text-xl font-bold">Order {orderLabel(order)}</p><b>{money(order.total)}</b></div>
       <p className="text-xs text-muted-foreground">{orderTime(order.createdAt)}</p>
-      {order.cancelled && <p className="mt-1 inline-block rounded-full bg-destructive px-2 py-0.5 text-[11px] font-bold text-destructive-foreground">✕ Cancelled by the admin: stock returned</p>}
+      {order.cancelled && <p className="mt-1 inline-block rounded-full bg-destructive px-2 py-0.5 text-[11px] font-bold text-destructive-foreground">✕ Cancelled: stock returned</p>}
       {awaitingConfirmation(order) && <p className="mt-1 inline-block rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold text-accent-foreground">⏳ Not confirmed: payment to be confirmed</p>}
       <div aria-label="Customer" className="mt-2 space-y-1 rounded-md border border-border bg-background/70 p-3 text-sm">
         <p className="font-bold">{name ?? "Name not saved"}</p>

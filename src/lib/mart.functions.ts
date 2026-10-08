@@ -245,6 +245,11 @@ export const giveGift = createServerFn({ method: "POST" })
   .validator((data: unknown) => id.extend({ index: z.number().int().min(0).max(20), productId: z.number().int().positive().nullable() }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<AdminOrder>(`/admin/orders/${data.id}/gift`, "POST", { index: data.index, productId: data.productId }));
 
+/** An order that won't be handed over (never paid for, nobody came): its items go back on the shelf. */
+export const cancelOrder = createServerFn({ method: "POST" })
+  .validator((data: unknown) => id.parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<AdminOrder>(`/admin/orders/${data.id}/cancel`, "POST"));
+
 export const deleteProduct = createServerFn({ method: "POST" })
   .validator((data: unknown) => id.parse(data))
   .handler(async ({ data }) => (await server()).callBackend<null>(`/admin/products/${data.id}`, "DELETE"));
