@@ -844,12 +844,14 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
 
   // Updates to one product are sent one at a time, in order, so a slower earlier reply can't undo a later change.
   const productQueues = useRef(new Map<number, Promise<void>>());
-  // Stock/threshold taps still waiting for the server, per product.
+  // Stock/threshold taps still waiting for the server, per product, and the server's latest reply for it.
   const pendingTaps = useRef(new Map<number, number>());
+  const lastReply = useRef(new Map<number, Product>());
   function updateProduct(id: number, changes: { stock?: number; stockDelta?: number; shelf?: number; threshold?: number; mrp?: number; markup?: number; category?: string; image?: string | null }) {
     const run = async () => {
       try {
         const updated = await api.admin.updateProduct(id, changes);
+        lastReply.current.set(id, updated);
         setProducts((current) => current.map((item) => (item.id === id ? { ...updated, ...pendingOptimistic(item, updated) } : item)));
       } catch (error) {
         toast.error(errorText(error, "Could not update the product."));
@@ -875,7 +877,10 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
     pendingTaps.current.set(id, (pendingTaps.current.get(id) ?? 0) + 1);
     void updateProduct(id, field === "stock" ? { stockDelta: value - item.stock } : { threshold: value }).finally(() => {
       pendingTaps.current.set(id, (pendingTaps.current.get(id) ?? 1) - 1);
-      if (!pendingTaps.current.get(id)) void api.products().then(setProducts).catch(() => undefined);
+      // The last tap is back: show what the server now has (its reply carries the item; the next sync
+      // brings anything else). Not a reload of every item: a quick run of taps across items stays light.
+      const latest = lastReply.current.get(id);
+      if (!pendingTaps.current.get(id) && latest) setProducts((current) => current.map((product) => (product.id === id ? latest : product)));
     });
   }
 
@@ -967,12 +972,14 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
   const [orderFilter, setOrderFilter] = useState<"pending" | "done" | "all">("pending");
   const [orderSearch, setOrderSearch] = useState("");
   const [updatingOrder, setUpdatingOrder] = useState<number | null>(null);
-  const orderCounts = { pending: orders.filter((o) => !o.fulfilled && !o.cancelled).length, done: orders.filter((o) => o.fulfilled).length, all: orders.length };
+  // Pending: not handed over yet, or handed over with a free item nobody has recorded (it's still to do).
+  const pendingOrder = (order: AdminOrder) => !order.cancelled && (!order.fulfilled || unrecordedGifts(order));
+  const orderCounts = { pending: orders.filter(pendingOrder).length, done: orders.filter((o) => o.fulfilled).length, all: orders.length };
   const shownOrders = useMemo(() => {
     const query = orderSearch.trim().toLowerCase();
     const digits = query.replace(/\D/g, "");
     return orders.filter((order) => {
-      if (orderFilter === "pending" && (order.fulfilled || order.cancelled)) return false;
+      if (orderFilter === "pending" && !pendingOrder(order)) return false;
       if (orderFilter === "done" && !order.fulfilled) return false;
       if (!query) return true;
       const { name, phone, email, block, room } = order.customer;
@@ -1574,11 +1581,17 @@ function RequestCard({ request, done }: { request: OrderRequest; done: () => voi
 const GIFT_TEXT = /^₹(\d+(?:\.\d+)?) (?:chocolate \(free\)|free snack)$/;
 const GIVEN_TEXT = /^(.+) \(free ₹(\d+(?:\.\d+)?) (chocolate|snack)\)$/;
 
-/** Which item the shop gave for a free chocolate or snack; picking one takes it off the stock. */
-function GiftChoice({ freebie, products, busy, label, choose }: { freebie: string; products: Product[]; busy: boolean; label: string; choose: (productId: number | null) => void }) {
+/** A free chocolate or snack the shop hasn't said anything about yet (which item, or none from its stock). */
+const giftUnrecorded = (order: AdminOrder, index: number) => GIFT_TEXT.test(order.freebies[index] ?? "") && order.freeItems?.[index] !== 0;
+const unrecordedGifts = (order: AdminOrder) => !order.cancelled && order.freebies.some((_, index) => giftUnrecorded(order, index));
+
+/** Which item the shop gave for a free chocolate or snack; picking one takes it off the stock. "None from the
+ * shop's stock" (a toffee it doesn't sell, say) is an answer too: nothing is taken. */
+function GiftChoice({ freebie, outside, products, busy, label, choose }: { freebie: string; outside: boolean; products: Product[]; busy: boolean; label: string; choose: (productId: number | null) => void }) {
   const given = GIVEN_TEXT.exec(freebie);
   const generic = GIFT_TEXT.exec(freebie);
   if (!given && !generic) return null;
+  const answered = Boolean(given) || outside;
   const chocolate = given ? given[3] === "chocolate" : freebie.includes("chocolate");
   const current = given ? products.find((product) => product.name === given[1]) : undefined;
   // Items that can be given (in stock, or the one already given); chocolates first for a free chocolate.
@@ -1587,10 +1600,11 @@ function GiftChoice({ freebie, products, busy, label, choose }: { freebie: strin
     .filter((product) => product.stock > 0 || product.id === current?.id)
     .sort((a, b) => first(b) - first(a) || a.mrp - b.mrp || a.name.localeCompare(b.name));
   return (
-    <label className={`mt-2 grid gap-1 rounded-md p-2 text-xs font-bold ${given ? "bg-background/70" : "bg-accent text-accent-foreground"}`}>
-      {given ? `Free ${chocolate ? "chocolate" : "snack"} given (off the stock)` : `Which ${chocolate ? "chocolate" : "snack"} did you give free? It comes off the stock.`}
-      <select aria-label={label} disabled={busy} value={current?.id ?? ""} onChange={(event) => choose(event.target.value ? Number(event.target.value) : null)} className="h-9 rounded-md border border-input bg-card px-2 text-sm font-normal text-foreground">
-        <option value="">{given ? "None from the shop's stock (put it back)" : "Choose the item you gave…"}</option>
+    <label className={`mt-2 grid gap-1 rounded-md p-2 text-xs font-bold ${answered ? "bg-background/70" : "bg-accent text-accent-foreground"}`}>
+      {given ? `Free ${chocolate ? "chocolate" : "snack"} given (off the stock)` : outside ? `Free ${chocolate ? "chocolate" : "snack"} given, not from the shop's stock` : `Which ${chocolate ? "chocolate" : "snack"} did you give free? It comes off the stock.`}
+      <select aria-label={label} disabled={busy} value={current ? String(current.id) : outside ? "none" : ""} onChange={(event) => { const value = event.target.value; if (value) choose(value === "none" ? null : Number(value)); }} className="h-9 rounded-md border border-input bg-card px-2 text-sm font-normal text-foreground">
+        {!answered && <option value="">Choose the item you gave…</option>}
+        <option value="none">None from the shop&apos;s stock{given ? " (put it back)" : ""}</option>
         {choices.map((product) => <option key={product.id} value={product.id}>{product.name} · ₹{product.mrp} · {product.stock} left</option>)}
       </select>
     </label>
@@ -1599,7 +1613,14 @@ function GiftChoice({ freebie, products, busy, label, choose }: { freebie: strin
 
 export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cancel, products, giveGift }: { order: AdminOrder; busy: boolean; setFulfilled: (fulfilled: boolean, paymentReceived?: boolean) => void; setPaymentReceived: (received: boolean) => void; cancel?: () => void; products?: Product[]; giveGift?: (index: number, productId: number | null) => void }) {
   // A UPI order whose payment isn't ticked yet: handing it over says the money arrived, so ask first.
+  const giftsLeft = Boolean(giveGift && products) && unrecordedGifts(order);
   const handOver = () => {
+    if (giftsLeft) {
+      // Said now or never: once handed over the order leaves Pending. "None from the shop's stock" is fine.
+      toast.info(`First choose which free item you gave with order ${orderLabel(order)}, or "None from the shop's stock".`, { id: `gift-${order.id}`, duration: 8000 });
+      document.querySelector<HTMLSelectElement>(`select[aria-label="Free item given with order ${orderLabel(order)}"]`)?.focus();
+      return;
+    }
     if (!awaitingConfirmation(order)) return setFulfilled(true);
     const reference = order.utr ? `She sent UPI reference ${order.utr}.` : "She hasn't sent a UPI reference.";
     if (window.confirm(`Did ${money(order.total)} arrive by UPI for order ${orderLabel(order)}?\n\n${reference} Only tap OK if you can see the money in PhonePe or your bank app: this confirms the payment and marks the order as fulfilled.`)) setFulfilled(true, true);
@@ -1614,6 +1635,7 @@ export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cance
       <p className="text-xs text-muted-foreground">{orderTime(order.createdAt)}</p>
       {order.cancelled && <p className="mt-1 inline-block rounded-full bg-destructive px-2 py-0.5 text-[11px] font-bold text-destructive-foreground">✕ Cancelled: stock returned</p>}
       {awaitingConfirmation(order) && <p className="mt-1 inline-block rounded-full bg-accent px-2 py-0.5 text-[11px] font-bold text-accent-foreground">⏳ Not confirmed: payment to be confirmed</p>}
+      {giftsLeft && order.fulfilled && <p className="mt-1 inline-block rounded-full bg-alert px-2 py-0.5 text-[11px] font-bold text-alert-foreground">🎁 Free item not recorded: choose it below</p>}
       <div aria-label="Customer" className="mt-2 space-y-1 rounded-md border border-border bg-background/70 p-3 text-sm">
         <p className="font-bold">{name ?? "Name not saved"}</p>
         {phone ? (
@@ -1628,7 +1650,7 @@ export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cance
       </div>
       <p className="mt-2 text-sm">{order.items.map((item) => `${item.name} ×${item.qty}`).join(", ")}</p>
       {order.freebies?.length ? <p className="text-xs font-bold text-primary">Free: {order.freebies.join(", ")}</p> : null}
-      {giveGift && products && !order.cancelled && order.freebies.map((freebie, index) => <GiftChoice key={index} freebie={freebie} products={products} busy={busy} label={`Free item given with order ${orderLabel(order)}`} choose={(productId) => giveGift(index, productId)} />)}
+      {giveGift && products && !order.cancelled && order.freebies.map((freebie, index) => <GiftChoice key={index} freebie={freebie} outside={order.freeItems?.[index] === 0} products={products} busy={busy} label={`Free item given with order ${orderLabel(order)}`} choose={(productId) => giveGift(index, productId)} />)}
       {order.cancelled ? null : order.payment === "UPI" ? (
         <div aria-label="Payment" className={`mt-2 rounded-md p-2 text-xs ${order.paymentConfirmed ? "bg-stock/40" : "bg-accent/60"}`}>
           <p className="font-bold">{order.paymentConfirmed ? "✓ UPI payment received" : order.utr ? "UPI · paid, please check" : "UPI · ⏳ waiting for payment"} · {money(order.total)}</p>
@@ -1761,7 +1783,7 @@ function PhotoPicker({ label, emoji, image, onPick, onRemove, compact = false }:
   return (
     <div className={compact ? "grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3" : "grid content-start gap-2"}>
       <div className={`relative grid ${compact ? "aspect-square" : "aspect-[4/3]"} w-full place-items-center overflow-hidden rounded-md border-2 border-dashed border-primary/30 bg-product`}>
-        {image ? <img src={image} alt={label} className="h-full w-full object-cover" /> : <div className="grid place-items-center gap-1 text-center text-muted-foreground"><span className={compact ? "text-4xl" : "text-5xl"} aria-hidden="true">{emoji}</span><span className="text-[11px] font-bold">No photo yet</span></div>}
+        {image ? <img src={image} alt={label} className="h-full w-full object-cover" loading="lazy" decoding="async" /> : <div className="grid place-items-center gap-1 text-center text-muted-foreground"><span className={compact ? "text-4xl" : "text-5xl"} aria-hidden="true">{emoji}</span><span className="text-[11px] font-bold">No photo yet</span></div>}
         {busy && <div className="absolute inset-0 grid place-items-center bg-background/75 text-center text-xs font-bold" role="status">Saving photo…</div>}
       </div>
       <div className="grid min-w-0 content-start gap-2">
@@ -2012,7 +2034,7 @@ function Checkout({ cartItems, products, coupon, firstOrder, dailyOffers, coupon
             {!takingOrders && <p className="mt-4 rounded-md bg-accent p-3 text-sm font-semibold text-accent-foreground">🌙 The store is offline and isn&apos;t taking orders right now. Send the shop a <b>request</b> for these snacks: the shopkeeper sees it and gets in touch with you. Nothing is charged until you order.</p>}
 
             <div className="mt-5 space-y-2">
-              {cartItems.map(item => <div key={item.id} className="flex items-center justify-between border-b border-border py-2"><span className="flex items-center gap-2">{item.image ? <img src={item.image} alt="" className="size-8 rounded object-cover" /> : <span aria-hidden="true">{item.emoji}</span>}<span><b>{item.name}</b> × {item.qty}</span></span><span>{money(toRupees(lineTotal(item, item.qty)))}</span></div>)}
+              {cartItems.map(item => <div key={item.id} className="flex items-center justify-between border-b border-border py-2"><span className="flex items-center gap-2">{item.image ? <img src={item.image} alt="" className="size-8 rounded object-cover" loading="lazy" decoding="async" /> : <span aria-hidden="true">{item.emoji}</span>}<span><b>{item.name}</b> × {item.qty}</span></span><span>{money(toRupees(lineTotal(item, item.qty)))}</span></div>)}
             </div>
 
             {!takingOrders ? <RequestForm cartItems={cartItems} deliveries={deliveries} myRequest={myRequest} subtotal={subtotal} onRequest={onRequest} /> : <>

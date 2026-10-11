@@ -70,7 +70,9 @@ export type OrderCustomer = {
   block?: Block;
   room?: string;
 };
-export type AdminOrder = Order & { customer: OrderCustomer };
+/** freeItems: beside each freebie, the item given for it (a product id), 0 for one given from outside the
+ * shop's stock, or null when nobody has said yet. */
+export type AdminOrder = Order & { customer: OrderCustomer; freeItems?: (number | null)[] };
 
 export type PlaceOrderInput = {
   items: { productId: number; quantity: number }[];

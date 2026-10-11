@@ -50,6 +50,7 @@ import type {
   Investment,
   InvestmentItem,
   InvestmentPeriod,
+  Product,
   Profit,
   ProfitFigures,
   ProfitItem,
@@ -1416,6 +1417,11 @@ function OrdersTab({
     : null;
   const moreToShow = olderFull ?? (orders?.length ?? 0) >= ORDER_PAGE;
   const [busy, setBusy] = useState<number | null>(null);
+  // The shop's items, for "which free item did you give" on order cards.
+  const [products, setProducts] = useState<Product[]>([]);
+  useEffect(() => {
+    void api.products().then(setProducts, () => undefined);
+  }, []);
 
   async function act(order: AdminOrder, run: () => Promise<AdminOrder>, done?: string) {
     setBusy(order.id);
@@ -1513,6 +1519,14 @@ function OrdersTab({
               void act(order, () => api.admin.setPaymentReceived(order.id, received))
             }
             cancel={() => cancel(order)}
+            products={products}
+            giveGift={(index, productId) =>
+              void act(order, async () => {
+                const updated = await api.admin.giveGift(order.id, index, productId);
+                setProducts(await api.products());
+                return updated;
+              })
+            }
           />
         ))}
       </div>

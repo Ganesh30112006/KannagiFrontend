@@ -2,7 +2,7 @@
 // the browser never learns the backend's address and never holds the login token.
 import { write } from "./live-sync";
 import * as fn from "./mart.functions";
-import type { CustomerProfile, KnownRevs, ManualSaleInput, OrderRequestInput, PlaceOrderInput, Product, Promotions, Result, StoreOverride } from "./mart-types";
+import type { CustomerProfile, KnownRevs, ManualSaleInput, OrderRequestInput, PlaceOrderInput, Product, Promotions, Result, StoreOverride, User } from "./mart-types";
 
 export class ApiError extends Error {
   constructor(
@@ -16,6 +16,15 @@ export class ApiError extends Error {
 /** Fired when the server says the session is over (expired, password changed, blocked or deleted), so a
  * page that stays open, like /admin, can go back to its sign-in. */
 export const SIGNED_OUT = "knm-signed-out";
+
+// The signed-in user, remembered by this tab for a few minutes: moving between the shop and the dashboard
+// doesn't ask the server again. (The API still checks the session on every call; signing in or out, or
+// any call answered "signed out", forgets it.)
+const KNOWN_USER_MS = 5 * 60_000;
+let knownUser: { user: User; at: number } | null = null;
+const forgetUser = () => {
+  knownUser = null;
+};
 
 export async function unwrap<T>(call: Promise<Result<T>>): Promise<T> {
   let result: Result<T>;
@@ -31,6 +40,7 @@ export async function unwrap<T>(call: Promise<Result<T>>): Promise<T> {
     throw new ApiError("Something went wrong on our side. Please try again in a moment.", 500);
   }
   if (!result.ok) {
+    if (result.status === 401 || result.status === 403) forgetUser(); // signed out, or no longer allowed here
     if (result.status === 401 && typeof window !== "undefined") window.dispatchEvent(new Event(SIGNED_OUT));
     throw new ApiError(result.message, result.status);
   }
@@ -41,17 +51,24 @@ export async function unwrap<T>(call: Promise<Result<T>>): Promise<T> {
 export const change = <T>(call: () => Promise<Result<T>>) => write(() => unwrap(call()));
 
 export const api = {
-  signup: (mobile: string, password: string) => unwrap(fn.signup({ data: { mobile, password } })),
-  login: (mobile: string, password: string) => unwrap(fn.login({ data: { mobile, password } })),
+  signup: (mobile: string, password: string) => (forgetUser(), unwrap(fn.signup({ data: { mobile, password } }))),
+  login: (mobile: string, password: string) => (forgetUser(), unwrap(fn.login({ data: { mobile, password } }))),
   /** Signing out also turns this device's order alerts off (for up to 3 seconds; then it signs out anyway). */
   logout: async () => {
     const alertsOff = import("./order-alerts").then((alerts) => alerts.forgetThisDevice());
     await Promise.race([alertsOff.catch(() => undefined), new Promise((done) => setTimeout(done, 3000))]);
+    forgetUser();
     return unwrap(fn.logout());
   },
-  /** The signed-in user, or null. */
-  me: () => unwrap(fn.me()),
-  shopkeeperLogin: (phone: string, password: string) => unwrap(fn.shopkeeperLogin({ data: { phone, password } })),
+  /** The signed-in user, or null. In the browser a signed-in user is remembered for a few minutes. */
+  me: async (): Promise<User | null> => {
+    if (typeof window === "undefined") return unwrap(fn.me()); // the server: never shared between visitors
+    if (knownUser && Date.now() - knownUser.at < KNOWN_USER_MS) return knownUser.user;
+    const user = await unwrap(fn.me());
+    knownUser = user ? { user, at: Date.now() } : null;
+    return user;
+  },
+  shopkeeperLogin: (phone: string, password: string) => (forgetUser(), unwrap(fn.shopkeeperLogin({ data: { phone, password } }))),
   forgotPassword: (mobile: string) => unwrap(fn.forgotPassword({ data: { mobile } })),
 
   profile: () => unwrap(fn.getProfile()),

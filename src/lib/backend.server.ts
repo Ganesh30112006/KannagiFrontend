@@ -27,6 +27,11 @@ const SESSION_MAX_AGE = 30 * 24 * 60 * 60; // matches the backend's JWT_EXPIRE_D
 // Room for the API on Render's free plan waking from sleep (up to a minute), Neon waking, and a
 // Cloudinary upload; under Vercel's 60-second limit per request.
 const TIMEOUT_MS = 55_000;
+// AWS answers 429 without running the API when every copy of it is busy (a burst of taps). Nothing
+// happened, so the request is sent again after a moment, up to twice. The API's own 429s (too many
+// wrong passwords, ...) say why in "detail" and are never repeated.
+const BUSY_RETRY_MS = [300, 1_000];
+const BUSY = "The Night Mart is very busy right now, so this wasn't saved. Please try again in a moment.";
 
 /** What's wrong with the settings, or null. */
 function settingsProblem(): string | null {
@@ -102,6 +107,11 @@ function failureReason(error: unknown, token: string | undefined): string {
   return reason.slice(0, 500);
 }
 
+/** A 429 from the API itself (it says why), not from AWS turning the request away. */
+async function apiSaidWhy(response: Response): Promise<boolean> {
+  return errorMessage(await response.clone().json().catch(() => null)) !== undefined;
+}
+
 export async function callBackend<T>(path: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" = "GET", body?: unknown): Promise<Result<T>> {
   if (SETTINGS_PROBLEM) {
     console.error(`Website setting problem: ${SETTINGS_PROBLEM}`);
@@ -116,12 +126,17 @@ export async function callBackend<T>(path: string, method: "GET" | "POST" | "PUT
 
   let response: Response;
   try {
-    response = await fetch(`${BACKEND_URL}/api${path}`, {
-      method,
-      headers,
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    for (let attempt = 0; ; attempt++) {
+      response = await fetch(`${BACKEND_URL}/api${path}`, {
+        method,
+        headers,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      const wait = BUSY_RETRY_MS[attempt];
+      if (response.status !== 429 || wait === undefined || (await apiSaidWhy(response))) break;
+      await new Promise((done) => setTimeout(done, wait + Math.random() * 200));
+    }
   } catch (error) {
     // For the host's logs (Vercel: the project → Logs): why the API couldn't be reached.
     console.error(`The API at ${BACKEND_URL} could not be reached: ${failureReason(error, token)}`);
@@ -133,7 +148,7 @@ export async function callBackend<T>(path: string, method: "GET" | "POST" | "PUT
   const data: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     // Never pass backend internals through; 5xx get a generic message.
-    const message = response.status >= 500 ? "Something went wrong on our side. Please try again." : errorMessage(data) ?? "Request failed.";
+    const message = response.status >= 500 ? "Something went wrong on our side. Please try again." : errorMessage(data) ?? (response.status === 429 ? BUSY : "Request failed.");
     return { ok: false, status: response.status, message };
   }
   return { ok: true, data: data as T };
