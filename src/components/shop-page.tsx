@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import {
   AlertTriangle,
   Bell,
+  Ban,
   Camera,
   Check,
   ChevronDown,
@@ -444,20 +445,41 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
     }
   }
 
-  async function finishOrderRequest(request: OrderRequest) {
+  /** Done (got in touch), declined (she's told the shop can't take it) or removed (she isn't told). */
+  async function settleOrderRequest(request: OrderRequest, how: "done" | "decline" | "remove") {
+    const who = request.customer?.name ?? "this customer";
+    if (how === "decline" && !window.confirm(`Decline ${who}'s request (${requestItems(request)})? She's told the shop can't take it.`)) return;
+    if (how === "remove" && !window.confirm(`Remove ${who}'s request (${requestItems(request)}) without telling her?`)) return;
     try {
-      await api.admin.finishOrderRequest(request.id);
+      await (how === "decline" ? api.admin.declineOrderRequest(request.id) : api.admin.finishOrderRequest(request.id));
       setOrderRequests((current) => current.filter((item) => item.id !== request.id));
+      if (how === "decline") toast.success(`Request declined. ${who === "this customer" ? "The customer" : who} is told.`);
+      if (how === "remove") toast.success("Request removed.");
     } catch (error) {
-      toast.error(errorText(error, "Could not mark the request done."));
+      toast.error(errorText(error, how === "decline" ? "Could not decline the request." : how === "remove" ? "Could not remove the request." : "Could not mark the request done."));
+    }
+  }
+
+  /** Every request on the list (one sent since stays: it's newer than the newest shown). */
+  async function removeAllOrderRequests() {
+    if (!orderRequests.length) return;
+    if (!window.confirm(`Remove all ${plural(orderRequests.length, "request")} without telling the customers?`)) return;
+    const newest = Math.max(...orderRequests.map((request) => request.createdAt));
+    try {
+      const { removed } = await api.admin.removeOrderRequests(newest);
+      setOrderRequests((current) => current.filter((request) => request.createdAt > newest));
+      toast.success(`${plural(removed, "request")} removed.`);
+    } catch (error) {
+      toast.error(errorText(error, "Could not remove the requests."));
     }
   }
 
   async function withdrawRequest() {
     try {
+      const declined = Boolean(myRequest?.declinedAt);
       await api.withdrawOrderRequest();
       setMyRequest(null);
-      toast.success("Request withdrawn.");
+      if (!declined) toast.success("Request withdrawn."); // a declined one is just put away
     } catch (error) {
       toast.error(errorText(error, "Could not withdraw the request."));
     }
@@ -520,7 +542,7 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
       ) : mode === "spin" ? (
         <SpinPage enabled={wheelEnabled} prizes={wheelRewards.filter((prize) => prize.active)} spun={spun} coupon={coupon} onResult={finishSpin} onShop={() => { setMode("customer"); void navigate({ to: "/shop" }); }} />
       ) : mode === "history" ? <OrderHistory orders={orders} onOpen={setReceipt} onPay={setPaying} onEditProfile={() => setProfileOpen(true)} onOrderAgain={orderAgain} loyalty={loyalty} /> : adminUnlocked ? (
-        <AdminView products={products} setProducts={setProducts} wishes={wishes} {...(user.isAdmin ? { removeWish } : {})} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} offlineOrders={store?.offlineOrders !== false} switchOfflineOrders={(enabled) => void switchOfflineOrders(enabled)} requests={orderRequests} finishRequest={(request) => void finishOrderRequest(request)} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} wheelEnabled={wheelEnabled} switchWheel={switchWheel} promotionsUnsaved={promotionsUnsaved} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={applyPromotions} />
+        <AdminView products={products} setProducts={setProducts} wishes={wishes} {...(user.isAdmin ? { removeWish } : {})} orders={adminOrders} setOrders={setAdminOrders} override={store?.override ?? "auto"} setOverride={changeOverride} storeOnline={storeOnline} offlineOrders={store?.offlineOrders !== false} switchOfflineOrders={(enabled) => void switchOfflineOrders(enabled)} requests={orderRequests} settleRequest={(request, how) => void settleOrderRequest(request, how)} removeAllRequests={() => void removeAllOrderRequests()} launchMessage={launchMessage} setLaunchMessage={edited(setLaunchMessage)} dailyOffers={dailyOffers} setDailyOffers={edited(setDailyOffers)} wheelRewards={wheelRewards} setWheelRewards={edited(setWheelRewards)} couponRule={couponRule} setCouponRule={edited(setCouponRule)} wheelEnabled={wheelEnabled} switchWheel={switchWheel} promotionsUnsaved={promotionsUnsaved} summary={salesSummary} manualSales={manualSales} setManualSales={setManualSales} promotionsSaved={applyPromotions} />
       ) : (
         <section className="mx-auto grid max-w-md gap-3 px-4 py-16 text-center">
           <h2 className="font-hand text-3xl font-bold">Shopkeeper dashboard</h2>
@@ -812,7 +834,7 @@ function SpinPage({ enabled, prizes, spun, coupon, onResult, onShop }: { enabled
   );
 }
 
-function AdminView({ products, setProducts, wishes, removeWish, orders, setOrders, override, setOverride, storeOnline, offlineOrders, switchOfflineOrders, requests, finishRequest, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, wheelEnabled, switchWheel, promotionsUnsaved, summary, manualSales, setManualSales, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; removeWish?: (name: string) => void; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; offlineOrders: boolean; switchOfflineOrders: (enabled: boolean) => void; requests: OrderRequest[]; finishRequest: (request: OrderRequest) => void; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; wheelEnabled: boolean; switchWheel: (enabled: boolean) => Promise<void>; promotionsUnsaved: boolean; summary: SalesSummary | null; manualSales: ManualSale[]; setManualSales: React.Dispatch<React.SetStateAction<ManualSale[]>>; promotionsSaved: (saved: Promotions) => void }) {
+function AdminView({ products, setProducts, wishes, removeWish, orders, setOrders, override, setOverride, storeOnline, offlineOrders, switchOfflineOrders, requests, settleRequest, removeAllRequests, launchMessage, setLaunchMessage, dailyOffers, setDailyOffers, wheelRewards, setWheelRewards, couponRule, setCouponRule, wheelEnabled, switchWheel, promotionsUnsaved, summary, manualSales, setManualSales, promotionsSaved }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; wishes: Wish[]; removeWish?: (name: string) => void; orders: AdminOrder[]; setOrders: React.Dispatch<React.SetStateAction<AdminOrder[]>>; override: StoreOverride; setOverride: (value: StoreOverride) => void; storeOnline: boolean; offlineOrders: boolean; switchOfflineOrders: (enabled: boolean) => void; requests: OrderRequest[]; settleRequest: (request: OrderRequest, how: "done" | "decline" | "remove") => void; removeAllRequests: () => void; launchMessage: string; setLaunchMessage: (value: string) => void; dailyOffers: DailyOffer[]; setDailyOffers: React.Dispatch<React.SetStateAction<DailyOffer[]>>; wheelRewards: WheelPrize[]; setWheelRewards: React.Dispatch<React.SetStateAction<WheelPrize[]>>; couponRule: CouponRule; setCouponRule: (value: CouponRule) => void; wheelEnabled: boolean; switchWheel: (enabled: boolean) => Promise<void>; promotionsUnsaved: boolean; summary: SalesSummary | null; manualSales: ManualSale[]; setManualSales: React.Dispatch<React.SetStateAction<ManualSale[]>>; promotionsSaved: (saved: Promotions) => void }) {
   const site = useSite();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -1168,10 +1190,11 @@ function AdminView({ products, setProducts, wishes, removeWish, orders, setOrder
           {(requests.length > 0 || !offlineOrders) && (
             <section aria-labelledby="requests-title">
               <h3 id="requests-title" className="flex items-center gap-2 font-hand text-3xl font-bold"><Inbox className="size-7 text-primary" /> Order requests{requests.length > 0 && <span className="rounded-full bg-alert px-2 font-sans text-sm leading-6 text-alert-foreground">{requests.length}</span>}</h3>
-              <p className="text-xs text-muted-foreground">Sent while the store was offline and not taking orders. Get in touch with her, then tap Done. No stock is kept for a request.</p>
+              <p className="text-xs text-muted-foreground">Sent while the store was offline and not taking orders. Get in touch with her, then tap Done; or Decline it (she&apos;s told the shop can&apos;t take it), or remove it with ×. No stock is kept for a request.</p>
+              {requests.length > 1 && <Button size="sm" variant="outline" className="mt-2 border-destructive/60 text-destructive" onClick={removeAllRequests}><Trash2 /> Remove all {requests.length}</Button>}
               <div className="mt-3 space-y-3">
                 {requests.length === 0 && <p className="border-2 border-dashed border-border bg-card p-4 text-center text-sm text-muted-foreground">No requests right now.</p>}
-                {requests.map((request) => <RequestCard key={request.id} request={request} done={() => finishRequest(request)} />)}
+                {requests.map((request) => <RequestCard key={request.id} request={request} settle={(how) => settleRequest(request, how)} />)}
               </div>
             </section>
           )}
@@ -1514,6 +1537,14 @@ const requestItems = (request: OrderRequest) => request.items.map((item) => `${i
 
 /** Her request on the shop page: what she asked for, and Withdraw. */
 function MyRequestNote({ request, takingOrders, onWithdraw }: { request: OrderRequest; takingOrders: boolean; onWithdraw: () => void }) {
+  if (request.declinedAt) {
+    return (
+      <div role="status" aria-label="Your request" className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-card/95 px-4 py-3 text-sm font-semibold text-foreground shadow-[3px_4px_0_var(--shadow-color)]">
+        <p className="min-w-0 flex-1 basis-60">😔 Sorry, the shop can&apos;t take your request ({requestItems(request)}) this time. {takingOrders ? "The shop is taking orders now: you can order from your cart." : "You can order once the store is open."}</p>
+        <Button size="sm" variant="outline" onClick={onWithdraw}>OK</Button>
+      </div>
+    );
+  }
   return (
     <div role="status" aria-label="Your request" className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-card/95 px-4 py-3 text-sm font-semibold text-foreground shadow-[3px_4px_0_var(--shadow-color)]">
       <p className="min-w-0 flex-1 basis-60">📨 Your request was sent {orderTime(request.createdAt)}: {requestItems(request)}. {takingOrders ? "The shop is taking orders now: you can order these from your cart." : "The shopkeeper will get in touch with you."}</p>
@@ -1538,7 +1569,7 @@ function RequestForm({ cartItems, deliveries, myRequest, subtotal, onRequest }: 
   }
   return (
     <>
-      {myRequest && <p className="mt-4 rounded-md border-2 border-dashed border-primary/35 bg-card p-3 text-sm">You already sent a request {orderTime(myRequest.createdAt)} ({requestItems(myRequest)}). Sending again replaces it.</p>}
+      {myRequest && <p className="mt-4 rounded-md border-2 border-dashed border-primary/35 bg-card p-3 text-sm">{myRequest.declinedAt ? `The shop couldn't take your last request (${requestItems(myRequest)}). You can send a new one.` : `You already sent a request ${orderTime(myRequest.createdAt)} (${requestItems(myRequest)}). Sending again replaces it.`}</p>}
       <div className="mt-4 flex justify-between text-sm"><span>Items at today&apos;s prices</span><span>{money(subtotal)}</span></div>
       <div className="mt-4 grid gap-2">
         <p className="font-hand text-xl font-bold">How would you like it?</p>
@@ -1547,20 +1578,20 @@ function RequestForm({ cartItems, deliveries, myRequest, subtotal, onRequest }: 
         </div>
       </div>
       <label className="mt-4 grid gap-1 text-sm font-semibold">Note for the shopkeeper (optional)<textarea aria-label="Request note" maxLength={200} rows={2} value={note} onChange={(event) => setNote(event.target.value)} placeholder="e.g. I'm awake till 1 am" className="rounded-md border border-input bg-card px-3 py-2 text-sm font-normal" /></label>
-      <Button onClick={() => void send()} disabled={sending} className="mt-4 h-12 w-full text-base"><Send /> {sending ? "Sending…" : myRequest ? "Send new request" : "Send request to the shop"}</Button>
+      <Button onClick={() => void send()} disabled={sending} className="mt-4 h-12 w-full text-base"><Send /> {sending ? "Sending…" : myRequest && !myRequest.declinedAt ? "Send new request" : "Send request to the shop"}</Button>
     </>
   );
 }
 
 /** A customer's request on the dashboard: who, where, what, and Done. */
-function RequestCard({ request, done }: { request: OrderRequest; done: () => void }) {
+function RequestCard({ request, settle }: { request: OrderRequest; settle: (how: "done" | "decline" | "remove") => void }) {
   const { name, phone, block, room } = request.customer ?? {};
   const hostelRoom = block && room ? `Block ${block}, Room ${room}` : room ? `Room ${room}` : null;
   const call = phone ? callLink(phone) : undefined;
   const chat = phone ? whatsappChat(phone, `Hi${name ? ` ${name}` : ""}! About your Kannagi Night Mart request (${requestItems(request)}): `) : undefined;
   return (
     <article aria-label={`Request from ${name ?? "a customer"}`} className="min-w-0 border-2 border-primary/30 bg-card p-4 [overflow-wrap:anywhere] shadow-[3px_4px_0_var(--shadow-color)]">
-      <div className="flex items-baseline justify-between gap-2"><p className="font-hand text-xl font-bold">{name ?? "Name not saved"}</p><span className="text-xs text-muted-foreground">{orderTime(request.createdAt)}</span></div>
+      <div className="flex items-start justify-between gap-2"><p className="font-hand text-xl font-bold">{name ?? "Name not saved"}</p><span className="flex items-center gap-1"><span className="text-xs text-muted-foreground">{orderTime(request.createdAt)}</span><Button size="icon" variant="ghost" className="size-8" aria-label={`Remove request from ${name ?? "a customer"}`} title="Remove (she isn't told)" onClick={() => settle("remove")}><X /></Button></span></div>
       {phone ? (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           <span className="tabular-nums">{formatMobile(phone)}</span>
@@ -1571,7 +1602,10 @@ function RequestCard({ request, done }: { request: OrderRequest; done: () => voi
       <p className="mt-1 text-sm">{request.delivery === "Room Delivery" ? <>🚚 Room delivery{hostelRoom ? ` to ${hostelRoom}` : ""}</> : <>🛍️ Pickup{hostelRoom ? ` · stays in ${hostelRoom}` : ""}</>}</p>
       <p className="mt-2 text-sm font-semibold">{requestItems(request)}</p>
       {request.note && <p className="mt-1 rounded-md bg-background/70 p-2 text-sm">“{request.note}”</p>}
-      <Button className="mt-3 w-full" variant="secondary" onClick={done}><Check /> Done</Button>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <Button variant="secondary" onClick={() => settle("done")}><Check /> Done</Button>
+        <Button variant="outline" className="border-destructive/60 text-destructive" onClick={() => settle("decline")}><Ban /> Decline</Button>
+      </div>
     </article>
   );
 }

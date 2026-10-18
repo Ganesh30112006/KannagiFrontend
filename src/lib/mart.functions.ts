@@ -296,6 +296,16 @@ export const finishOrderRequest = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ id: z.number().int().positive() }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<null>(`/admin/order-requests/${data.id}`, "DELETE"));
 
+/** The shop can't take it: off the list, and she's told. */
+export const declineOrderRequest = createServerFn({ method: "POST" })
+  .validator((data: unknown) => z.object({ id: z.number().int().positive() }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<null>(`/admin/order-requests/${data.id}/decline`, "POST"));
+
+/** Every request on the list, up to the newest one shown (one sent since stays). */
+export const removeOrderRequests = createServerFn({ method: "POST" })
+  .validator((data: unknown) => z.object({ through: z.number().int().min(0).max(253_402_300_799_999) }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<{ removed: number }>(`/admin/order-requests?through=${data.through}`, "DELETE"));
+
 /** What's in her cart, sent to the shop while it isn't taking orders. Sending again replaces it. */
 export const sendOrderRequest = createServerFn({ method: "POST" })
   .validator((data: unknown) =>

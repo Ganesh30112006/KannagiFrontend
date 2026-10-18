@@ -146,6 +146,8 @@ export type OrderRequest = {
   items: { productId: number; name: string; qty: number }[];
   delivery: Delivery;
   note?: string;
+  /** When the shop declined it (her own request only: the shop's list leaves declined ones out). */
+  declinedAt?: number;
   /** Shopkeepers and admins only. */
   customer?: OrderCustomer;
 };

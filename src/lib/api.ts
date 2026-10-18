@@ -114,6 +114,8 @@ export const api = {
     setStore: (override: StoreOverride) => change(() => fn.setStore({ data: { override } })),
     switchOfflineOrders: (enabled: boolean) => change(() => fn.switchOfflineOrders({ data: { enabled } })),
     finishOrderRequest: (id: number) => change(() => fn.finishOrderRequest({ data: { id } })),
+    declineOrderRequest: (id: number) => change(() => fn.declineOrderRequest({ data: { id } })),
+    removeOrderRequests: (through: number) => change(() => fn.removeOrderRequests({ data: { through } })),
     recordManualSale: (sale: ManualSaleInput) => change(() => fn.recordManualSale({ data: sale })),
     undoManualSale: (id: number) => change(() => fn.undoManualSale({ data: { id } })),
   },
