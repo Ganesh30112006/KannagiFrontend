@@ -22,6 +22,13 @@ function otherTabs(): BroadcastChannel | null {
         ? new BroadcastChannel("knm-sync")
         : null;
     channel?.addEventListener("message", notify);
+    // An alert pushed to this device (a new order, her order ready, ...): the service worker says so, and
+    // open pages sync at once instead of at their next check (public/sw.js).
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener("message", (event: MessageEvent) => {
+        if ((event.data as { type?: unknown } | null)?.type === "knm-sync") notify();
+      });
+    }
   }
   return channel;
 }
@@ -51,9 +58,11 @@ const MAX_BACKOFF_MS = 60_000;
  * Runs `sync` every `everyMs` while the page is visible (every `hiddenEveryMs` while hidden, or not at
  * all when that is null), right away when the page comes back, the phone reconnects or a write
  * finishes, and never two at once. After failures it waits longer each time, up to a minute.
+ * `sync` is told whether it's only the timer's routine check (`scheduled`): then it may first ask
+ * cheaply whether anything changed. After anything else (a write, another tab, coming back) it syncs.
  */
 export function useLiveSync(
-  sync: () => Promise<void>,
+  sync: (scheduled: boolean) => Promise<void>,
   {
     enabled,
     everyMs,
@@ -65,7 +74,8 @@ export function useLiveSync(
   const timing = useRef({ everyMs, hiddenEveryMs });
   timing.current = { everyMs, hiddenEveryMs };
   // active: false once the page is gone, so a sync still in flight then doesn't schedule another.
-  const state = useRef({ active: false, running: false, again: false, failures: 0, timer: 0 });
+  // prompted: something asked for this sync (not only the timer); it stays set until a sync runs.
+  const state = useRef({ active: false, running: false, again: false, prompted: true, failures: 0, timer: 0 });
   const tick = useRef(async () => {});
 
   const schedule = useCallback((delay: number | null) => {
@@ -83,9 +93,11 @@ export function useLiveSync(
     const { everyMs: every, hiddenEveryMs: hiddenEvery } = timing.current;
     if (document.hidden && hiddenEvery === null) return; // resumes when the page is shown again
     current.running = true;
+    const scheduled = !current.prompted && current.failures === 0;
+    current.prompted = false;
     let next: number | null = document.hidden ? hiddenEvery : every;
     try {
-      await syncRef.current();
+      await syncRef.current(scheduled);
       current.failures = 0;
     } catch {
       current.failures++;
@@ -101,7 +113,10 @@ export function useLiveSync(
     }
   };
 
-  const syncSoon = useCallback(() => schedule(SOON_MS), [schedule]);
+  const syncSoon = useCallback(() => {
+    state.current.prompted = true;
+    schedule(SOON_MS);
+  }, [schedule]);
 
   useEffect(() => {
     if (!enabled) return;

@@ -114,9 +114,23 @@ function compressed(response: Response, request: Request): Response {
   });
 }
 
+// GET /pulse: whether anything on the site changed (src/lib/backend.server.ts). The same answer for every
+// visitor and nothing personal, so Vercel's network may keep it for PULSE_CDN_SECONDS: most of the pages'
+// frequent checks are answered there and never start this server or the API.
+const PULSE_CDN_SECONDS = 2;
+
+async function pulseResponse(request: Request): Promise<Response> {
+  const { currentPulse } = await import("./lib/backend.server");
+  const pulse = await currentPulse();
+  const headers = new Headers({ "content-type": "application/json" });
+  headers.set("Cache-Control", pulse === null ? "no-store" : `public, max-age=0, s-maxage=${PULSE_CDN_SECONDS}, stale-while-revalidate=2`);
+  return withSecurityHeaders(new Response(JSON.stringify({ pulse }), { status: pulse === null ? 503 : 200, headers }), request);
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      if (request.method === "GET" && new URL(request.url).pathname === "/pulse") return await pulseResponse(request);
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return compressed(

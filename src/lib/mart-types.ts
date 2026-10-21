@@ -88,6 +88,8 @@ export type PlaceOrderInput = {
   expectedTotal?: number;
   /** Her loyalty reward, used on this order: the free item she picked. */
   loyaltyPick?: string;
+  /** One per checkout: the same order sent again (a retry, a double tap) gets the first one back. */
+  requestKey?: string;
 };
 
 /** An offer card: its text, and what checkout gives (pricing.ts quote). An amount not set (null or left
@@ -215,6 +217,8 @@ export type Live = { products: Product[]; store: StoreStatus; spin: SpinStatus }
 /** What changed since the revisions the page sent: store and coupon always, the rest only when changed. */
 export type SyncResult = {
   revs: Revs;
+  /** What /pulse says while nothing changes (APIs from before the pulse leave it out). */
+  pulse?: string;
   store: StoreStatus;
   spin: SpinStatus;
   site?: SiteDetails;

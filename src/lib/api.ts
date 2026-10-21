@@ -78,6 +78,18 @@ export const api = {
   live: () => unwrap(fn.getLive()),
   /** Only what changed since the revisions the page already has. */
   sync: (revs: KnownRevs) => unwrap(fn.getSync({ data: revs })),
+  /** Whether anything changed (the same for everyone, so the site's network can answer it): null when it
+   * couldn't be told. */
+  pulse: async (): Promise<string | null> => {
+    try {
+      const response = await fetch("/pulse", { credentials: "omit" });
+      if (!response.ok) return null;
+      const data = (await response.json()) as { pulse?: unknown };
+      return typeof data.pulse === "string" ? data.pulse : null;
+    } catch {
+      return null;
+    }
+  },
   products: () => unwrap(fn.getProducts()),
   store: () => unwrap(fn.getStore()),
   promotions: () => unwrap(fn.getPromotions()),
@@ -115,6 +127,7 @@ export const api = {
     switchOfflineOrders: (enabled: boolean) => change(() => fn.switchOfflineOrders({ data: { enabled } })),
     finishOrderRequest: (id: number) => change(() => fn.finishOrderRequest({ data: { id } })),
     declineOrderRequest: (id: number) => change(() => fn.declineOrderRequest({ data: { id } })),
+    acceptOrderRequest: (id: number) => change(() => fn.acceptOrderRequest({ data: { id } })),
     removeOrderRequests: (through: number) => change(() => fn.removeOrderRequests({ data: { through } })),
     recordManualSale: (sale: ManualSaleInput) => change(() => fn.recordManualSale({ data: sale })),
     undoManualSale: (id: number) => change(() => fn.undoManualSale({ data: { id } })),

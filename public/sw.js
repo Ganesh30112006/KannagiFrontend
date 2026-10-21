@@ -1,6 +1,6 @@
 // Order alerts (src/lib/order-alerts.ts): shows each alert the API pushes (a new order), even when the
-// website is closed, and opens the dashboard when it's tapped. It does nothing else: no caching, and
-// pages load exactly as they would without it.
+// website is closed, opens the dashboard when it's tapped, and tells open pages to sync. It does nothing
+// else: no caching, and pages load exactly as they would without it.
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
@@ -19,17 +19,24 @@ self.addEventListener("push", (event) => {
   } catch {
     alert = {};
   }
-  // Every push is shown: browsers stop delivering to a site whose pushes show nothing.
+  // Every push is shown: browsers stop delivering to a site whose pushes show nothing. Open pages of the
+  // site are told too, so they sync at once instead of at their next check (src/lib/live-sync.ts).
   event.waitUntil(
-    self.registration.showNotification(text(alert.title, "New order"), {
-      body: text(alert.body, "Open the dashboard to see it."),
-      icon: "/favicon.png",
-      badge: "/favicon.png",
-      tag: text(alert.tag, "order"),
-      renotify: true,
-      vibrate: [200, 100, 200],
-      data: { url: pagePath(alert.url) },
-    }),
+    Promise.all([
+      self.registration.showNotification(text(alert.title, "New order"), {
+        body: text(alert.body, "Open the dashboard to see it."),
+        icon: "/favicon.png",
+        badge: "/favicon.png",
+        tag: text(alert.tag, "order"),
+        renotify: true,
+        vibrate: [200, 100, 200],
+        data: { url: pagePath(alert.url) },
+      }),
+      self.clients
+        .matchAll({ type: "window" })
+        .then((pages) => pages.forEach((page) => page.postMessage({ type: "knm-sync" })))
+        .catch(() => undefined),
+    ]),
   );
 });
 

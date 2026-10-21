@@ -183,6 +183,7 @@ export const placeOrder = createServerFn({ method: "POST" })
         room: z.string().trim().max(20).optional(),
         expectedTotal: z.number().min(0).max(10_000_000).optional(),
         loyaltyPick: z.string().trim().max(80).optional(),
+        requestKey: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/).optional(),
       })
       .parse(data),
   )
@@ -295,6 +296,11 @@ export const switchOfflineOrders = createServerFn({ method: "POST" })
 export const finishOrderRequest = createServerFn({ method: "POST" })
   .validator((data: unknown) => z.object({ id: z.number().int().positive() }).parse(data))
   .handler(async ({ data }) => (await server()).callBackend<null>(`/admin/order-requests/${data.id}`, "DELETE"));
+
+/** The shop takes it: her request becomes her order (stock taken, on the Orders list, she's told). */
+export const acceptOrderRequest = createServerFn({ method: "POST" })
+  .validator((data: unknown) => z.object({ id: z.number().int().positive() }).parse(data))
+  .handler(async ({ data }) => (await server()).callBackend<AdminOrder>(`/admin/order-requests/${data.id}/accept`, "POST"));
 
 /** The shop can't take it: off the list, and she's told. */
 export const declineOrderRequest = createServerFn({ method: "POST" })

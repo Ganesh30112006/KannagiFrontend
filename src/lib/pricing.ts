@@ -229,3 +229,65 @@ function finish(subtotal: number, fee: number, deal: Deal | null): Quote {
   const discount = Math.max(0, Math.min(deal?.discount ?? 0, subtotal + fee));
   return { subtotal, fee, discount, total: subtotal + fee - discount, deal };
 }
+
+// --- the next offer: what a little more in the cart would get her ---
+
+/** What an order gets, in paise: money off plus the free chocolate's and free pick's worth. */
+const dealWorth = (deal: Deal | null) => (deal ? deal.discount + deal.gift * 100 + (deal.freePick ? deal.pickValue * 100 : 0) : 0);
+
+export type NextOffer = {
+  /** Paise more to add. */
+  gap: number;
+  /** The cart total (paise) that gets it. */
+  at: number;
+  /** What she'd get, e.g. "a free ₹5 chocolate". */
+  gives: string;
+};
+
+/** The nearest offer (₹50+, ₹100+, bulk) that would give her more than this cart gets now, and how far
+ * away it is; null when there's none to reach. Priced with quote(), so it agrees with checkout. */
+export function nextOffer(input: QuoteInput): NextOffer | null {
+  const now = quote(input);
+  const offer = (id: DailyOffer["id"]) => input.dailyOffers.find((item) => item.id === id);
+  const steps: { id: DailyOffer["id"]; at: number }[] = [
+    { id: "tier50", at: 5000 },
+    { id: "tier100", at: 10000 },
+    { id: "bulk", at: 20100 },
+  ];
+  for (const { id, at } of steps) {
+    if (!offer(id)?.active || now.subtotal >= at) continue;
+    // The cart as it would be with just enough more (one stand-in item makes up the difference).
+    const filler = { product: { name: "", mrp: toRupees(at - now.subtotal), markup: 0 }, qty: 1 };
+    const then = quote({ ...input, lines: [...input.lines, filler] });
+    // Only when that offer itself is what she gets then (not a coupon or the first-order discount instead).
+    const deal = then.deal;
+    if (deal?.kind !== id || dealWorth(deal) <= dealWorth(now.deal)) continue;
+    const gives =
+      deal.kind === "tier50" ? `a free ₹${deal.gift} chocolate`
+      : deal.kind === "tier100" ? `a free snack (up to ₹${deal.pickUpTo})`
+      : deal.kind === "bulk" ? `${offer("bulk")?.percent ?? OFFER_DEFAULTS.bulkPercent}% off${deal.freeDelivery ? " and free delivery" : ""}`
+      : deal.label;
+    return { gap: at - now.subtotal, at, gives };
+  }
+  return null;
+}
+
+/** Up to `limit` items to add that would reach the next offer: in stock beyond what's in the cart, and
+ * Popular ones and other shelf sections than the cart's first (they go together: noodles with a chocolate);
+ * ones that alone close the gap first, cheapest of those. */
+export function addOnsFor(products: Product[], cart: (Product & { qty: number })[], gap: number, limit = 3): Product[] {
+  const inCart = new Map(cart.map((item) => [item.id, item.qty]));
+  const sections = new Set(cart.map((item) => item.category));
+  const price = (product: Product) => toPaise(salePrice(product));
+  return products
+    .filter((product) => !isEggProduct(product) && product.stock - (inCart.get(product.id) ?? 0) > 0 && !inCart.has(product.id))
+    .map((product) => ({
+      product,
+      closes: price(product) >= gap ? 1 : 0,
+      popular: product.popular ? 1 : 0,
+      other: sections.has(product.category) ? 0 : 1,
+    }))
+    .sort((a, b) => b.closes - a.closes || b.popular - a.popular || b.other - a.other || price(a.product) - price(b.product))
+    .slice(0, limit)
+    .map(({ product }) => product);
+}

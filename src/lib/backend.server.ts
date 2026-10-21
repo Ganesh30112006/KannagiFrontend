@@ -112,6 +112,42 @@ async function apiSaidWhy(response: Response): Promise<boolean> {
   return errorMessage(await response.clone().json().catch(() => null)) !== undefined;
 }
 
+// --- the pulse: whether anything changed, the same for every visitor ---
+// Open pages ask often (every few seconds); the answer is kept here for PULSE_KEEP_MS and only one call at
+// a time goes to the API, so however many pages are open, the API answers at most one pulse per moment.
+// Vercel's network keeps it too (the Cache-Control set in server.ts), so most never reach this server.
+const PULSE_KEEP_MS = 1_500;
+let pulseKept: { value: string; at: number } | null = null;
+let pulseAsked: Promise<string | null> | null = null;
+
+async function askPulse(): Promise<string | null> {
+  if (SETTINGS_PROBLEM) return null;
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/pulse`, {
+      headers: { "X-Internal-Key": INTERNAL_API_KEY, Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { pulse?: unknown };
+    return typeof data.pulse === "string" ? data.pulse : null;
+  } catch (error) {
+    console.error(`The API at ${BACKEND_URL} could not be reached for the pulse: ${failureReason(error, undefined)}`);
+    return null;
+  }
+}
+
+/** The current pulse, or null when the API couldn't say (pages then sync in full). */
+export async function currentPulse(now = Date.now()): Promise<string | null> {
+  if (pulseKept && now - pulseKept.at < PULSE_KEEP_MS) return pulseKept.value;
+  pulseAsked ??= askPulse().then((value) => {
+    if (value !== null) pulseKept = { value, at: Date.now() };
+    return value;
+  }).finally(() => {
+    pulseAsked = null;
+  });
+  return pulseAsked;
+}
+
 export async function callBackend<T>(path: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" = "GET", body?: unknown): Promise<Result<T>> {
   if (SETTINGS_PROBLEM) {
     console.error(`Website setting problem: ${SETTINGS_PROBLEM}`);
