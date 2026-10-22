@@ -507,9 +507,20 @@ export function ShopPage({ user, initialMode = "customer", signedOutTo = "/", em
   async function withdrawRequest() {
     try {
       const declined = Boolean(myRequest?.declinedAt);
+      const sentAt = myRequest?.createdAt ?? 0;
       await api.withdrawOrderRequest();
       setMyRequest(null);
-      if (!declined) toast.success("Request withdrawn."); // a declined one is just put away
+      if (declined) return; // a declined one is just put away
+      // Withdrawing changes nothing once the shop has made it her order (or she has ordered since), and this
+      // page may not have synced that yet: an order newer than the request says so.
+      const latest = await api.myOrders().catch(() => null);
+      const made = latest?.find((order) => order.createdAt >= sentAt && !order.cancelled);
+      if (!latest || !made) {
+        toast.success("Request withdrawn.");
+        return;
+      }
+      setOrders(latest);
+      toast.info(`The shop already took your request: it's order ${orderLabel(made)} now, in My Orders.`, { duration: 8000 });
     } catch (error) {
       toast.error(errorText(error, "Could not withdraw the request."));
     }
