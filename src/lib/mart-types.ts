@@ -60,6 +60,8 @@ export type Order = {
   cancelled: boolean;
   onRequest: boolean;
   freebies: string[];
+  /** Her request's note, on an order the shop made from it. */
+  note?: string;
 };
 
 /** Who placed an order and where it goes (shopkeeper only). Any field may be missing on old orders. */

@@ -1727,6 +1727,7 @@ export function OrderCard({ order, busy, setFulfilled, setPaymentReceived, cance
         {email && <p className="break-all text-xs text-muted-foreground">{email}</p>}
       </div>
       <p className="mt-2 text-sm">{order.items.map((item) => `${item.name} ×${item.qty}`).join(", ")}</p>
+      {order.note && <p className="mt-1 rounded-md bg-background/70 p-2 text-sm">“{order.note}”</p>}
       {order.freebies?.length ? <p className="text-xs font-bold text-primary">Free: {order.freebies.join(", ")}</p> : null}
       {giveGift && products && !order.cancelled && order.freebies.map((freebie, index) => <GiftChoice key={index} freebie={freebie} outside={order.freeItems?.[index] === 0} products={products} busy={busy} label={`Free item given with order ${orderLabel(order)}`} choose={(productId) => giveGift(index, productId)} />)}
       {order.cancelled ? null : order.payment === "UPI" ? (
